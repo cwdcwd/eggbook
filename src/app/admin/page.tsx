@@ -2,6 +2,8 @@ import { Users, Package, ShoppingCart, DollarSign } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
 import { db } from "@/lib/db";
 
+export const dynamic = 'force-dynamic';
+
 async function getStats() {
   const [totalUsers, totalSellers, totalListings, totalOrders] = await Promise.all([
     db.user.count(),

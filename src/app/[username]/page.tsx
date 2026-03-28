@@ -7,6 +7,8 @@ import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
 import type { EggListing, Tag, Post, SellerProfile, User } from "@prisma/client";
 
+export const dynamic = 'force-dynamic';
+
 type ListingWithTags = EggListing & { tags: Tag[] };
 type SellerProfileWithRelations = SellerProfile & { listings: ListingWithTags[]; posts: Post[] };
 type UserWithProfile = User & { sellerProfile: SellerProfileWithRelations | null };

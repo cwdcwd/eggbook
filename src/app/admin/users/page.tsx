@@ -1,4 +1,6 @@
 import { db } from "@/lib/db";
+
+export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { Ban, CheckCircle, Eye } from "lucide-react";

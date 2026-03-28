@@ -1,5 +1,7 @@
 import Image from "next/image";
 import { db } from "@/lib/db";
+
+export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { Eye, Trash2, Flag } from "lucide-react";

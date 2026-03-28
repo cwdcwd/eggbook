@@ -44,7 +44,7 @@ export default function DashboardLayout({
             </Link>
 
             <div className="flex items-center gap-4">
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
             </div>
           </div>
         </div>

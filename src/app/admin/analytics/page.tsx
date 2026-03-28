@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
+
+export const dynamic = 'force-dynamic';
 import { formatPrice } from "@/lib/utils";
 
 async function getAnalytics() {
