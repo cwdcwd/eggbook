@@ -12,7 +12,9 @@ Build a Progressive Web App marketplace where egg sellers create profile pages (
 | Framework | Next.js 14 (App Router) |
 | Styling | Tailwind CSS |
 | Auth | Clerk (email/password + Google, Facebook, Apple) |
-| Database | PostgreSQL via Supabase |
+| Database | Vercel Postgres |
+| File Storage | Vercel Blob |
+| Real-time | Pusher |
 | Payments | Stripe (Connect for marketplace) |
 | Maps | Mapbox or Google Maps |
 | PWA | next-pwa |
@@ -28,7 +30,7 @@ Build a Progressive Web App marketplace where egg sellers create profile pages (
 - Set up Vercel project & environment variables
 
 ### 1.2 Database Setup
-- Create Supabase project with PostgreSQL
+- Create Vercel Postgres database
 - Design schema (see Data Model below)
 - Set up Prisma ORM with migrations
 
@@ -99,7 +101,7 @@ SellerMonthlyVolume (for fee tiers)
 
 ### 3.2 Egg Listing Management
 - Create/edit/delete listings
-- Photo upload (multiple per listing, cloud storage via Supabase Storage or Cloudinary)
+- Photo upload (multiple per listing, via Vercel Blob)
 - Tag selector (multi-select from predefined + custom tags)
 - Flexible pricing: select unit type, set price
 - Stock count input with availability toggle
@@ -146,7 +148,7 @@ SellerMonthlyVolume (for fee tiers)
 
 ### 4.5 Messaging
 - Conversation threads per seller (or per order)
-- Real-time updates (Supabase Realtime or polling)
+- Real-time updates via Pusher
 - Unread badge/notification
 
 ### 4.6 Favorites
@@ -291,7 +293,7 @@ SellerMonthlyVolume (for fee tiers)
 ## Decisions
 
 - **Clerk over NextAuth**: Better DX, built-in UI components, easier social auth setup
-- **Supabase over Vercel Postgres**: Includes Storage for photos + Realtime for messaging
+- **Vercel native services**: Vercel Postgres for DB, Vercel Blob for file storage, Pusher for real-time messaging
 - **Stripe Connect Express**: Simplest marketplace payout setup
 - **Request-based ordering**: Allows sellers to manage capacity, prevents overselling
 - **Tag-based egg types**: Flexible, extensible, no rigid category structure
