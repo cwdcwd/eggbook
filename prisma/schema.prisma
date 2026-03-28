@@ -1,0 +1,216 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User synced from Clerk
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  username  String   @unique
+  email     String   @unique
+  role      UserRole @default(BUYER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sellerProfile  SellerProfile?
+  orders         Order[]         @relation("BuyerOrders")
+  favorites      Favorite[]
+  conversations1 Conversation[]  @relation("Buyer")
+  conversations2 Conversation[]  @relation("Seller")
+  messages       Message[]
+}
+
+enum UserRole {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+// Seller profile with location and pickup settings
+model SellerProfile {
+  id                  String     @id @default(cuid())
+  userId              String     @unique
+  user                User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName         String
+  bio                 String?
+  avatarUrl           String?
+  address             String?
+  city                String?
+  state               String?
+  zip                 String?
+  lat                 Float?
+  lng                 Float?
+  maxDeliveryDistance Float?     // miles
+  pickupType          PickupType @default(ARRANGED)
+  pickupHours         Json?      // JSON object with day/time slots
+  isActive            Boolean    @default(true)
+  stripeAccountId     String?    // Stripe Connect account
+  stripeOnboarded     Boolean    @default(false)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  listings EggListing[]
+  orders   Order[]
+  posts    Post[]
+}
+
+enum PickupType {
+  TIMESLOT  // Specific time slots
+  HOURS     // Available hours display
+  ARRANGED  // Arrange after order
+}
+
+// Egg listing with flexible pricing
+model EggListing {
+  id             String   @id @default(cuid())
+  sellerId       String
+  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?
+  pricePerUnit   Float
+  unit           PricingUnit @default(DOZEN)
+  customUnitName String?
+  customUnitQty  Int?
+  stockCount     Int      @default(0)
+  isAvailable    Boolean  @default(true)
+  photos         String[] // Array of Vercel Blob URLs
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tags   Tag[]   @relation("ListingTags")
+  orders Order[]
+}
+
+enum PricingUnit {
+  EGG
+  HALF_DOZEN
+  DOZEN
+  FLAT       // 30 eggs
+  CUSTOM
+}
+
+// Tags for egg types (chicken, duck, organic, free-range, etc.)
+model Tag {
+  id       String       @id @default(cuid())
+  name     String       @unique
+  slug     String       @unique
+  listings EggListing[] @relation("ListingTags")
+}
+
+// Order with request-based flow
+model Order {
+  id              String          @id @default(cuid())
+  buyerId         String
+  buyer           User            @relation("BuyerOrders", fields: [buyerId], references: [id])
+  sellerId        String
+  seller          SellerProfile   @relation(fields: [sellerId], references: [id])
+  listingId       String
+  listing         EggListing      @relation(fields: [listingId], references: [id])
+  quantity        Int
+  totalPrice      Float
+  platformFee     Float           @default(0)
+  status          OrderStatus     @default(PENDING)
+  fulfillmentType FulfillmentType @default(PICKUP)
+  pickupTime      DateTime?
+  deliveryAddress String?
+  deliveryLat     Float?
+  deliveryLng     Float?
+  stripePaymentId String?
+  paidAt          DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  conversation Conversation?
+}
+
+enum OrderStatus {
+  PENDING    // Buyer submitted, waiting for seller
+  CONFIRMED  // Seller confirmed
+  PAID       // Payment completed
+  COMPLETED  // Order fulfilled
+  CANCELLED  // Cancelled by either party
+  DECLINED   // Seller declined
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
+// Messaging
+model Conversation {
+  id        String    @id @default(cuid())
+  buyerId   String
+  buyer     User      @relation("Buyer", fields: [buyerId], references: [id])
+  sellerId  String
+  seller    User      @relation("Seller", fields: [sellerId], references: [id])
+  orderId   String?   @unique
+  order     Order?    @relation(fields: [orderId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages Message[]
+
+  @@unique([buyerId, sellerId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  content        String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+}
+
+// Favorites
+model Favorite {
+  id               String @id @default(cuid())
+  userId           String
+  user             User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sellerProfileId  String
+  createdAt        DateTime @default(now())
+
+  @@unique([userId, sellerProfileId])
+}
+
+// Seller posts/feed
+model Post {
+  id        String        @id @default(cuid())
+  sellerId  String
+  seller    SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  content   String
+  imageUrl  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+// Track monthly sales for fee tiers
+model SellerMonthlyVolume {
+  id         String  @id @default(cuid())
+  sellerId   String
+  month      Int     // 1-12
+  year       Int
+  totalSales Float   @default(0)
+  feeTier    FeeTier @default(FREE)
+
+  @@unique([sellerId, month, year])
+}
+
+enum FeeTier {
+  FREE     // $0-500/month, 0% fee
+  STARTER  // $500-2000/month, 2% fee
+  PRO      // $2000+/month, 3% fee
+}

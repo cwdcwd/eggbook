@@ -1,0 +1,152 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { db } from "@/lib/db";
+import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
+import { triggerNewOrder } from "@/lib/pusher";
+
+// Create a new order
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { listingId, quantity, fulfillmentType, pickupTime, deliveryAddress, deliveryLat, deliveryLng } = body;
+
+    // Get the listing
+    const listing = await db.eggListing.findUnique({
+      where: { id: listingId },
+      include: { seller: true },
+    });
+
+    if (!listing) {
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
+
+    if (!listing.isAvailable || listing.stockCount < quantity) {
+      return NextResponse.json({ error: "Not enough stock" }, { status: 400 });
+    }
+
+    // Get buyer
+    const buyer = await db.user.findUnique({
+      where: { clerkId: userId },
+    });
+
+    if (!buyer) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Calculate price and fee
+    const totalPrice = listing.pricePerUnit * quantity;
+    
+    // Get seller's current month volume for fee calculation
+    const now = new Date();
+    const volume = await db.sellerMonthlyVolume.findUnique({
+      where: {
+        sellerId_month_year: {
+          sellerId: listing.sellerId,
+          month: now.getMonth() + 1,
+          year: now.getFullYear(),
+        },
+      },
+    });
+
+    const { feePercent } = calculateFeeTier(volume?.totalSales || 0);
+    const platformFee = calculatePlatformFee(totalPrice, feePercent);
+
+    // Create order
+    const order = await db.order.create({
+      data: {
+        buyerId: buyer.id,
+        sellerId: listing.sellerId,
+        listingId: listing.id,
+        quantity,
+        totalPrice,
+        platformFee,
+        fulfillmentType,
+        pickupTime: pickupTime ? new Date(pickupTime) : null,
+        deliveryAddress,
+        deliveryLat,
+        deliveryLng,
+      },
+      include: {
+        listing: true,
+        buyer: true,
+      },
+    });
+
+    // Notify seller via Pusher
+    await triggerNewOrder(listing.seller.userId, {
+      id: order.id,
+      buyerName: buyer.username,
+      listingTitle: listing.title,
+      quantity,
+      totalPrice,
+    });
+
+    return NextResponse.json(order);
+  } catch (error) {
+    console.error("Error creating order:", error);
+    return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
+  }
+}
+
+// Get orders for current user
+export async function GET(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      include: { sellerProfile: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const role = searchParams.get("role") || "buyer"; // buyer or seller
+    const status = searchParams.get("status");
+
+    let orders;
+
+    if (role === "seller" && user.sellerProfile) {
+      orders = await db.order.findMany({
+        where: {
+          sellerId: user.sellerProfile.id,
+          ...(status && { status: status as any }),
+        },
+        include: {
+          listing: true,
+          buyer: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    } else {
+      orders = await db.order.findMany({
+        where: {
+          buyerId: user.id,
+          ...(status && { status: status as any }),
+        },
+        include: {
+          listing: true,
+          seller: {
+            include: { user: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+
+    return NextResponse.json(orders);
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 });
+  }
+}

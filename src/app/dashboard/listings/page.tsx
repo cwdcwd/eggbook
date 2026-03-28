@@ -1,0 +1,97 @@
+import Link from "next/link";
+import Image from "next/image";
+import { Plus, Edit, Trash2, MoreVertical } from "lucide-react";
+import { Button, Card, Badge } from "@/components/ui";
+import { formatPrice, getUnitDisplay } from "@/lib/utils";
+
+// Placeholder data - will be replaced with actual data fetching
+async function getListings() {
+  return [];
+}
+
+export default async function ListingsPage() {
+  const listings = await getListings();
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-amber-900">My Listings</h1>
+          <p className="text-amber-600">Manage your egg listings</p>
+        </div>
+        <Link href="/dashboard/listings/new">
+          <Button>
+            <Plus className="w-4 h-4 mr-2" />
+            New Listing
+          </Button>
+        </Link>
+      </div>
+
+      {listings.length === 0 ? (
+        <Card className="p-12 text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Plus className="w-8 h-8 text-amber-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-amber-900 mb-2">
+            No listings yet
+          </h3>
+          <p className="text-amber-600 mb-6 max-w-sm mx-auto">
+            Create your first egg listing to start selling to customers in your area.
+          </p>
+          <Link href="/dashboard/listings/new">
+            <Button>Create Your First Listing</Button>
+          </Link>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {listings.map((listing: any) => (
+            <Card key={listing.id} className="overflow-hidden">
+              <div className="aspect-video relative bg-amber-100">
+                {listing.photos?.[0] ? (
+                  <Image
+                    src={listing.photos[0]}
+                    alt={listing.title}
+                    fill
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-amber-400">
+                    No photo
+                  </div>
+                )}
+                <div className="absolute top-2 right-2">
+                  <Badge variant={listing.isAvailable ? "success" : "warning"}>
+                    {listing.isAvailable ? "Available" : "Unavailable"}
+                  </Badge>
+                </div>
+              </div>
+              <div className="p-4">
+                <h3 className="font-semibold text-amber-900 mb-1">
+                  {listing.title}
+                </h3>
+                <p className="text-amber-600 text-sm mb-2">
+                  {formatPrice(listing.pricePerUnit)} per{" "}
+                  {getUnitDisplay(listing.unit, listing.customUnitName)}
+                </p>
+                <p className="text-amber-500 text-sm mb-4">
+                  Stock: {listing.stockCount}
+                </p>
+                <div className="flex gap-2">
+                  <Link href={`/dashboard/listings/${listing.id}/edit`} className="flex-1">
+                    <Button variant="outline" size="sm" className="w-full">
+                      <Edit className="w-4 h-4 mr-1" />
+                      Edit
+                    </Button>
+                  </Link>
+                  <Button variant="ghost" size="sm">
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
