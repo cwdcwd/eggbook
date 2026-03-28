@@ -12,9 +12,10 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: { q?: string; lat?: string; lng?: string };
+  searchParams: Promise<{ q?: string; lat?: string; lng?: string }>;
 }) {
-  const sellers = await getSellers(searchParams);
+  const params = await searchParams;
+  const sellers = await getSellers(params);
 
   return (
     <div className="min-h-screen bg-amber-50">
@@ -49,7 +50,7 @@ export default async function ExplorePage({
               <input
                 type="text"
                 placeholder="Enter your location..."
-                defaultValue={searchParams.q}
+                defaultValue={params.q}
                 className="flex-1 outline-none text-gray-700"
               />
             </div>

@@ -7,10 +7,6 @@ declare global {
 
 // Lazy getter for Prisma client
 function getPrismaClient(): PrismaClient {
-  if (!process.env.PRISMA_DATABASE_URL) {
-    throw new Error('PRISMA_DATABASE_URL is not set')
-  }
-  
   if (!global.prisma) {
     global.prisma = new PrismaClient({
       log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],

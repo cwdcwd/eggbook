@@ -5,10 +5,16 @@ import { redirect } from "next/navigation";
 import { Heart, MapPin, Trash2 } from "lucide-react";
 import { Card, Button, Badge } from "@/components/ui";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export const dynamic = 'force-dynamic';
 
-async function getFavorites(clerkId: string) {
+type Favorite = Prisma.FavoriteGetPayload<object>;
+type SellerWithRelations = Prisma.SellerProfileGetPayload<{
+  include: { user: true; listings: true };
+}>;
+
+async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {
   const user = await db.user.findUnique({
     where: { clerkId },
     include: {
@@ -32,7 +38,7 @@ async function getFavorites(clerkId: string) {
   // Get seller profiles for each favorite
   const sellerProfiles = await db.sellerProfile.findMany({
     where: {
-      id: { in: favorites.map((f) => f.sellerProfileId) },
+      id: { in: favorites.map((f: Favorite) => f.sellerProfileId) },
     },
     include: {
       user: true,

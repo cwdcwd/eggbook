@@ -1,12 +1,17 @@
 import Image from "next/image";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { Eye, Trash2, Flag } from "lucide-react";
 
-async function getListings() {
+type ListingWithRelations = Prisma.EggListingGetPayload<{
+  include: { seller: { include: { user: true } }; tags: true };
+}>;
+
+async function getListings(): Promise<ListingWithRelations[]> {
   return db.eggListing.findMany({
     orderBy: { createdAt: "desc" },
     include: {
