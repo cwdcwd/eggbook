@@ -5,14 +5,13 @@ declare global {
   var prisma: PrismaClient | undefined
 }
 
-// Lazy getter for Prisma client
+// Standard Prisma client for direct Postgres connection
 function getPrismaClient(): PrismaClient {
   if (!global.prisma) {
     global.prisma = new PrismaClient({
       log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
     })
   }
-  
   return global.prisma
 }
 
