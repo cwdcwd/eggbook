@@ -50,6 +50,7 @@ export async function PUT(req: NextRequest) {
     const {
       displayName,
       bio,
+      avatarUrl,
       address,
       city,
       state,
@@ -74,6 +75,7 @@ export async function PUT(req: NextRequest) {
       update: {
         displayName: displayName.trim(),
         bio: bio?.trim() || null,
+        avatarUrl: avatarUrl || null,
         address: address?.trim() || null,
         city: city?.trim() || null,
         state: state?.trim() || null,
@@ -85,6 +87,7 @@ export async function PUT(req: NextRequest) {
         userId: user.id,
         displayName: displayName.trim(),
         bio: bio?.trim() || null,
+        avatarUrl: avatarUrl || null,
         address: address?.trim() || null,
         city: city?.trim() || null,
         state: state?.trim() || null,

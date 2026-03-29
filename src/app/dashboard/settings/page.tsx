@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
-import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2 } from "lucide-react";
+import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X } from "lucide-react";
 
 const PICKUP_TYPES = [
   { value: "TIMESLOT", label: "Specific Time Slots", description: "Buyers select from your available time slots" },
@@ -15,6 +15,7 @@ function SettingsContent() {
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [isConnectingStripe, setIsConnectingStripe] = useState(false);
   const [stripeStatus, setStripeStatus] = useState<{
     connected: boolean;
@@ -25,6 +26,7 @@ function SettingsContent() {
   const [profile, setProfile] = useState({
     displayName: "",
     bio: "",
+    avatarUrl: "",
     address: "",
     city: "",
     state: "",
@@ -32,6 +34,34 @@ function SettingsContent() {
     maxDeliveryDistance: "",
     pickupType: "ARRANGED",
   });
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to upload image");
+      }
+      
+      const { url } = await res.json();
+      setProfile((prev) => ({ ...prev, avatarUrl: url }));
+    } catch (error) {
+      console.error("Failed to upload avatar:", error);
+      setMessage({ type: "error", text: "Failed to upload image. Please try again." });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   // Load existing profile on mount
   useEffect(() => {
@@ -45,6 +75,7 @@ function SettingsContent() {
             setProfile({
               displayName: data.sellerProfile.displayName || "",
               bio: data.sellerProfile.bio || "",
+              avatarUrl: data.sellerProfile.avatarUrl || "",
               address: data.sellerProfile.address || "",
               city: data.sellerProfile.city || "",
               state: data.sellerProfile.state || "",
@@ -154,6 +185,68 @@ function SettingsContent() {
           <CardTitle>Profile Information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Profile Photo/Logo */}
+          <div>
+            <label className="block text-sm font-medium text-amber-900 mb-2">
+              Profile Photo / Logo
+            </label>
+            <div className="flex items-center gap-4">
+              <div className="relative w-24 h-24 rounded-full overflow-hidden bg-amber-100 flex items-center justify-center">
+                {profile.avatarUrl ? (
+                  <>
+                    <img
+                      src={profile.avatarUrl}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setProfile((prev) => ({ ...prev, avatarUrl: "" }))}
+                      className="absolute top-0 right-0 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-4xl">🥚</span>
+                )}
+              </div>
+              <div>
+                <label className="cursor-pointer">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isUploadingAvatar}
+                    onClick={() => document.getElementById("avatar-upload")?.click()}
+                  >
+                    {isUploadingAvatar ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Upload Photo
+                      </>
+                    )}
+                  </Button>
+                  <input
+                    id="avatar-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
+                </label>
+                <p className="text-xs text-amber-500 mt-1">
+                  Recommended: Square image, at least 200x200px
+                </p>
+              </div>
+            </div>
+          </div>
+
           <Input
             label="Display Name"
             placeholder="Your farm or seller name"
