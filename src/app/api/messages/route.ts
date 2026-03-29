@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { triggerNewMessage } from "@/lib/pusher";
+import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
 export async function POST(req: NextRequest) {
@@ -14,9 +15,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { conversationId, content, recipientId } = body;
 
-    const user = await db.user.findUnique({
-      where: { clerkId: userId },
-    });
+    const user = await getOrCreateUser(userId);
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -118,12 +117,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const user = await db.user.findUnique({
-      where: { clerkId: userId },
-    });
+    const user = await getOrCreateUser(userId);
 
     if (!user) {
-      // User not synced to database yet - return empty array instead of error
+      // User could not be created - return empty array
       return NextResponse.json([]);
     }
 

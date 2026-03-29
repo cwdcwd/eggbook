@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { createCheckoutSession } from "@/lib/stripe";
+import { getOrCreateUser } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,9 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get user
-    const user = await db.user.findUnique({
-      where: { clerkId: userId },
-    });
+    const user = await getOrCreateUser(userId);
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });

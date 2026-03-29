@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
+import { getOrCreateUser } from "@/lib/auth";
 
 // Create a new listing
 export async function POST(req: NextRequest) {
@@ -12,10 +13,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get user with seller profile
-    const user = await db.user.findUnique({
-      where: { clerkId: userId },
-      include: { sellerProfile: true },
-    });
+    const user = await getOrCreateUser(userId);
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -125,13 +123,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const user = await db.user.findUnique({
-      where: { clerkId: userId },
-      include: { sellerProfile: true },
-    });
+    const user = await getOrCreateUser(userId);
 
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json([]);
     }
 
     if (!user.sellerProfile) {

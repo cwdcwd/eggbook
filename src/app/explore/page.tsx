@@ -3,10 +3,39 @@ import Image from "next/image";
 import { MapPin, Search, Filter, Star, Heart } from "lucide-react";
 import { Button, Card, Badge, Input } from "@/components/ui";
 import { formatPrice } from "@/lib/utils";
+import { db } from "@/lib/db";
 
-// Placeholder - will be replaced with actual data fetching
-async function getSellers(searchParams: { q?: string; lat?: string; lng?: string }) {
-  return [];
+// Fetch active sellers with their listings
+async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string }) {
+  const sellers = await db.sellerProfile.findMany({
+    where: {
+      isActive: true,
+      listings: {
+        some: { isAvailable: true },
+      },
+      ...(searchParams.q && {
+        OR: [
+          { displayName: { contains: searchParams.q, mode: "insensitive" } },
+          { city: { contains: searchParams.q, mode: "insensitive" } },
+          { state: { contains: searchParams.q, mode: "insensitive" } },
+        ],
+      }),
+    },
+    include: {
+      user: {
+        select: { username: true },
+      },
+      listings: {
+        where: { isAvailable: true },
+        include: { tags: true },
+        take: 5,
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 50,
+  });
+
+  return sellers;
 }
 
 export default async function ExplorePage({

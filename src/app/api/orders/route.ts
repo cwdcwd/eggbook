@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
+import { getOrCreateUser } from "@/lib/auth";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -30,9 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get buyer
-    const buyer = await db.user.findUnique({
-      where: { clerkId: userId },
-    });
+    const buyer = await getOrCreateUser(userId);
 
     if (!buyer) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });

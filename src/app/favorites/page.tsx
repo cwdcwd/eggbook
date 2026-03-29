@@ -6,6 +6,8 @@ import { Heart, MapPin, Trash2 } from "lucide-react";
 import { Card, Button, Badge } from "@/components/ui";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { RemoveFavoriteButton } from "@/components/RemoveFavoriteButton";
+import { getOrCreateUser } from "@/lib/auth";
 
 export const dynamic = 'force-dynamic';
 
@@ -15,17 +17,7 @@ type SellerWithRelations = Prisma.SellerProfileGetPayload<{
 }>;
 
 async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {
-  const user = await db.user.findUnique({
-    where: { clerkId },
-    include: {
-      favorites: {
-        include: {
-          // Note: We need to join through SellerProfile to User
-          // This is a simplified version
-        },
-      },
-    },
-  });
+  const user = await getOrCreateUser(clerkId);
 
   if (!user) return [];
 
@@ -34,6 +26,8 @@ async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
   });
+
+  if (favorites.length === 0) return [];
 
   // Get seller profiles for each favorite
   const sellerProfiles = await db.sellerProfile.findMany({
@@ -141,9 +135,7 @@ export default async function FavoritesPage() {
                       View Profile
                     </Button>
                   </Link>
-                  <Button variant="ghost" size="sm">
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </Button>
+                  <RemoveFavoriteButton sellerProfileId={seller.id} />
                 </div>
               </Card>
             ))}

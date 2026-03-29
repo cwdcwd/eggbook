@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
-import { MapPin, CreditCard, Clock, Save, Check, AlertCircle } from "lucide-react";
+import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2 } from "lucide-react";
 
 const PICKUP_TYPES = [
   { value: "TIMESLOT", label: "Specific Time Slots", description: "Buyers select from your available time slots" },
@@ -10,10 +11,15 @@ const PICKUP_TYPES = [
   { value: "ARRANGED", label: "Arranged After Order", description: "Coordinate pickup time after order is confirmed" },
 ];
 
-export default function SettingsPage() {
+function SettingsContent() {
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [stripeConnected, setStripeConnected] = useState(false);
+  const [isConnectingStripe, setIsConnectingStripe] = useState(false);
+  const [stripeStatus, setStripeStatus] = useState<{
+    connected: boolean;
+    onboarded: boolean;
+  }>({ connected: false, onboarded: false });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   const [profile, setProfile] = useState({
@@ -46,8 +52,14 @@ export default function SettingsPage() {
               maxDeliveryDistance: data.sellerProfile.maxDeliveryDistance?.toString() || "",
               pickupType: data.sellerProfile.pickupType || "ARRANGED",
             });
-            setStripeConnected(data.sellerProfile.stripeOnboarded || false);
           }
+        }
+
+        // Check Stripe status
+        const stripeRes = await fetch("/api/stripe");
+        if (stripeRes.ok) {
+          const stripeData = await stripeRes.json();
+          setStripeStatus(stripeData);
         }
       } catch (error) {
         console.error("Error loading settings:", error);
@@ -57,6 +69,18 @@ export default function SettingsPage() {
     }
     loadSettings();
   }, []);
+
+  // Handle Stripe return
+  useEffect(() => {
+    const stripeParam = searchParams.get("stripe");
+    if (stripeParam === "success") {
+      setMessage({ type: "success", text: "Stripe account connected successfully!" });
+      // Refresh Stripe status
+      fetch("/api/stripe").then(res => res.json()).then(setStripeStatus);
+    } else if (stripeParam === "refresh") {
+      setMessage({ type: "error", text: "Stripe setup incomplete. Please try again." });
+    }
+  }, [searchParams]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -84,8 +108,29 @@ export default function SettingsPage() {
   };
 
   const connectStripe = async () => {
-    // TODO: Redirect to Stripe Connect onboarding
-    console.log("Connecting Stripe...");
+    setIsConnectingStripe(true);
+    try {
+      const res = await fetch("/api/stripe", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to start Stripe setup");
+      }
+
+      const { url } = await res.json();
+      if (url) {
+        window.location.href = url;
+      }
+    } catch (error) {
+      console.error("Error connecting Stripe:", error);
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to connect Stripe",
+      });
+      setIsConnectingStripe(false);
+    }
   };
 
   if (isLoading) {
@@ -236,16 +281,31 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {stripeConnected ? (
+          {stripeStatus.onboarded ? (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Badge variant="success">Connected</Badge>
                 <span className="text-sm text-amber-600">
-                  Your Stripe account is connected
+                  Your Stripe account is ready to receive payments
                 </span>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={connectStripe}>
                 Manage
+              </Button>
+            </div>
+          ) : stripeStatus.connected ? (
+            <div className="text-center py-4">
+              <Badge variant="warning" className="mb-2">Setup Incomplete</Badge>
+              <p className="text-amber-600 mb-4">
+                Your Stripe account is connected but setup is incomplete.
+              </p>
+              <Button onClick={connectStripe} disabled={isConnectingStripe}>
+                {isConnectingStripe ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <CreditCard className="w-4 h-4 mr-2" />
+                )}
+                Complete Setup
               </Button>
             </div>
           ) : (
@@ -253,8 +313,12 @@ export default function SettingsPage() {
               <p className="text-amber-600 mb-4">
                 Connect your Stripe account to receive payments from buyers.
               </p>
-              <Button onClick={connectStripe}>
-                <CreditCard className="w-4 h-4 mr-2" />
+              <Button onClick={connectStripe} disabled={isConnectingStripe}>
+                {isConnectingStripe ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <CreditCard className="w-4 h-4 mr-2" />
+                )}
                 Connect Stripe
               </Button>
             </div>
@@ -288,5 +352,19 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+        </div>
+      }
+    >
+      <SettingsContent />
+    </Suspense>
   );
 }

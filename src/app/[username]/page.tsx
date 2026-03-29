@@ -6,6 +6,7 @@ import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ListingCard } from "@/components/ListingCard";
+import { SellerActionButtons } from "@/components/SellerActionButtons";
 import type { EggListing, Tag, Post, SellerProfile, User } from "@prisma/client";
 
 export const dynamic = 'force-dynamic';
@@ -137,17 +138,11 @@ export default async function SellerProfilePage({
               </div>
 
               <div className="flex flex-wrap justify-center sm:justify-start gap-2">
-                <Button>
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  Message
-                </Button>
-                <Button variant="outline">
-                  <Heart className="w-4 h-4 mr-2" />
-                  Favorite
-                </Button>
-                <Button variant="ghost">
-                  <Share2 className="w-4 h-4" />
-                </Button>
+                <SellerActionButtons
+                  sellerProfileId={profile.id}
+                  sellerUserId={seller.id}
+                  sellerUsername={seller.username}
+                />
               </div>
             </div>
           </div>

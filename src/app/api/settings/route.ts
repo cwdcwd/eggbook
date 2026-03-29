@@ -1,39 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-
-// Helper to get or create user from Clerk data
-async function getOrCreateUser(clerkUserId: string) {
-  let user = await db.user.findUnique({
-    where: { clerkId: clerkUserId },
-    include: { sellerProfile: true },
-  });
-
-  if (!user) {
-    // User not in DB yet - fetch from Clerk and create
-    const clerkUser = await currentUser();
-    if (!clerkUser) {
-      return null;
-    }
-
-    const email = clerkUser.emailAddresses[0]?.emailAddress;
-    if (!email) {
-      return null;
-    }
-
-    user = await db.user.create({
-      data: {
-        clerkId: clerkUserId,
-        email,
-        username: clerkUser.username || email.split("@")[0],
-        role: "BUYER",
-      },
-      include: { sellerProfile: true },
-    });
-  }
-
-  return user;
-}
+import { getOrCreateUser } from "@/lib/auth";
 
 // Get current user's seller profile
 export async function GET() {
