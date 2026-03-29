@@ -6,12 +6,19 @@ import { formatPrice } from "@/lib/utils";
 import { db } from "@/lib/db";
 
 // Fetch active sellers with their listings
-async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string }) {
+async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string; delivery?: string }) {
   const sellers = await db.sellerProfile.findMany({
     where: {
       isActive: true,
       listings: {
-        some: { isAvailable: true },
+        some: { 
+          isAvailable: true,
+          ...(searchParams.tag && {
+            tags: {
+              some: { slug: searchParams.tag },
+            },
+          }),
+        },
       },
       ...(searchParams.q && {
         OR: [
@@ -19,6 +26,9 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
           { city: { contains: searchParams.q, mode: "insensitive" } },
           { state: { contains: searchParams.q, mode: "insensitive" } },
         ],
+      }),
+      ...(searchParams.delivery === "true" && {
+        maxDeliveryDistance: { gt: 0 },
       }),
     },
     include: {
@@ -41,7 +51,7 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; lat?: string; lng?: string }>;
+  searchParams: Promise<{ q?: string; lat?: string; lng?: string; tag?: string; delivery?: string }>;
 }) {
   const params = await searchParams;
   const sellers = await getSellers(params);
@@ -73,21 +83,22 @@ export default async function ExplorePage({
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Search Bar */}
         <div className="mb-8">
-          <div className="flex gap-2 bg-white rounded-full p-2 shadow-lg border border-amber-200 max-w-2xl mx-auto">
+          <form action="/explore" method="get" className="flex gap-2 bg-white rounded-full p-2 shadow-lg border border-amber-200 max-w-2xl mx-auto">
             <div className="flex-1 flex items-center gap-2 px-4">
               <MapPin className="w-5 h-5 text-amber-500" />
               <input
                 type="text"
-                placeholder="Enter your location..."
+                name="q"
+                placeholder="Search by location, seller name..."
                 defaultValue={params.q}
                 className="flex-1 outline-none text-gray-700"
               />
             </div>
-            <Button className="flex items-center gap-2">
+            <Button type="submit" className="flex items-center gap-2">
               <Search className="w-5 h-5" />
               <span className="hidden sm:inline">Search</span>
             </Button>
-          </div>
+          </form>
         </div>
 
         {/* Filters */}
@@ -96,12 +107,21 @@ export default async function ExplorePage({
             <Filter className="w-4 h-4 mr-1" />
             Filters
           </Button>
-          <Button variant="outline" size="sm">Chicken</Button>
-          <Button variant="outline" size="sm">Duck</Button>
-          <Button variant="outline" size="sm">Organic</Button>
-          <Button variant="outline" size="sm">Free-Range</Button>
-          <Button variant="outline" size="sm">Pickup Today</Button>
-          <Button variant="outline" size="sm">Delivery Available</Button>
+          <Link href="/explore?tag=chicken">
+            <Button variant="outline" size="sm">Chicken</Button>
+          </Link>
+          <Link href="/explore?tag=duck">
+            <Button variant="outline" size="sm">Duck</Button>
+          </Link>
+          <Link href="/explore?tag=organic">
+            <Button variant="outline" size="sm">Organic</Button>
+          </Link>
+          <Link href="/explore?tag=free-range">
+            <Button variant="outline" size="sm">Free-Range</Button>
+          </Link>
+          <Link href="/explore?delivery=true">
+            <Button variant="outline" size="sm">Delivery Available</Button>
+          </Link>
         </div>
 
         {/* Results */}

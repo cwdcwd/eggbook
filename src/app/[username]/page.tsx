@@ -16,6 +16,14 @@ type SellerProfileWithRelations = SellerProfile & { listings: ListingWithTags[];
 type UserWithProfile = User & { sellerProfile: SellerProfileWithRelations | null };
 
 async function getSellerByUsername(username: string): Promise<UserWithProfile | null> {
+  console.log("Querying for username:", username);
+  
+  // Debug: Log all users
+  const allUsers = await db.user.findMany({ 
+    select: { username: true, role: true },
+  });
+  console.log("All users in DB:", allUsers);
+  
   const user = await db.user.findUnique({
     where: { username },
     include: {
@@ -44,9 +52,11 @@ export default async function SellerProfilePage({
   params: Promise<{ username: string }>;
 }) {
   const { username: rawUsername } = await params;
-  // Remove @ if present
-  const username = rawUsername.replace("@", "");
+  // Remove @ if present and decode URL encoding
+  const username = decodeURIComponent(rawUsername).replace(/^@/, "");
+  console.log("Profile page - rawUsername:", rawUsername, "parsed username:", username);
   const seller = await getSellerByUsername(username);
+  console.log("Profile page - seller found:", !!seller, "has profile:", !!seller?.sellerProfile);
 
   if (!seller || !seller.sellerProfile) {
     notFound();
