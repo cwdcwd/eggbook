@@ -158,12 +158,21 @@ export default async function ExplorePage({
               <Link href={`/@${seller.user.username}`} key={seller.id}>
                 <Card className="overflow-hidden hover:shadow-lg transition-shadow">
                   <div className="aspect-video relative bg-amber-100">
-                    {seller.avatarUrl ? (
+                    {seller.listings?.[0]?.photos?.[0] ? (
+                      <Image
+                        src={seller.listings[0].photos[0]}
+                        alt={seller.listings[0].title || seller.displayName}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                      />
+                    ) : seller.avatarUrl ? (
                       <Image
                         src={seller.avatarUrl}
                         alt={seller.displayName}
                         fill
                         className="object-cover"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                       />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center text-6xl">
