@@ -1,9 +1,10 @@
 import Link from "next/link";
 import Image from "next/image";
-import { MapPin, Search, Filter, Star, Heart } from "lucide-react";
+import { MapPin, Search, Filter, Star, Heart, MessageSquare } from "lucide-react";
 import { Button, Card, Badge, Input } from "@/components/ui";
 import { formatPrice } from "@/lib/utils";
 import { db } from "@/lib/db";
+import { auth } from "@clerk/nextjs/server";
 
 // Fetch active sellers with their listings
 async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string; delivery?: string }) {
@@ -55,6 +56,8 @@ export default async function ExplorePage({
 }) {
   const params = await searchParams;
   const sellers = await getSellers(params);
+  const { userId } = await auth();
+  const isLoggedIn = !!userId;
 
   return (
     <div className="min-h-screen bg-amber-50">
@@ -69,12 +72,23 @@ export default async function ExplorePage({
               <span className="text-xl font-bold text-amber-900">Eggbook</span>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/favorites" className="text-amber-600 hover:text-amber-700">
-                <Heart className="w-6 h-6" />
-              </Link>
-              <Link href="/sign-in">
-                <Button variant="outline" size="sm">Sign In</Button>
-              </Link>
+              {isLoggedIn ? (
+                <>
+                  <Link href="/favorites" className="text-amber-600 hover:text-amber-700">
+                    <Heart className="w-6 h-6" />
+                  </Link>
+                  <Link href="/messages" className="text-amber-600 hover:text-amber-700">
+                    <MessageSquare className="w-6 h-6" />
+                  </Link>
+                  <Link href="/dashboard">
+                    <Button variant="outline" size="sm">Dashboard</Button>
+                  </Link>
+                </>
+              ) : (
+                <Link href="/sign-in">
+                  <Button variant="outline" size="sm">Sign In</Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>

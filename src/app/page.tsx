@@ -72,26 +72,27 @@ export default async function Home() {
             </p>
             
             {/* Search Box */}
-            <div className="max-w-xl mx-auto mb-12">
+            <form action="/explore" method="get" className="max-w-xl mx-auto mb-12">
               <div className="flex gap-2 bg-white rounded-full p-2 shadow-lg border border-amber-200">
                 <div className="flex-1 flex items-center gap-2 px-4">
                   <MapPin className="w-5 h-5 text-amber-500" />
                   <input 
-                    type="text" 
+                    type="text"
+                    name="q"
                     placeholder="Enter your location..."
                     className="flex-1 outline-none text-gray-700"
                   />
                 </div>
-                <button className="bg-amber-500 text-white px-6 py-3 rounded-full font-medium hover:bg-amber-600 transition-colors flex items-center gap-2">
+                <button type="submit" className="bg-amber-500 text-white px-6 py-3 rounded-full font-medium hover:bg-amber-600 transition-colors flex items-center gap-2">
                   <Search className="w-5 h-5" />
                   <span className="hidden sm:inline">Find Eggs</span>
                 </button>
               </div>
-            </div>
+            </form>
 
             <div className="flex flex-wrap justify-center gap-4">
               <Link 
-                href="/sign-up?role=buyer" 
+                href="/explore" 
                 className="bg-amber-500 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-amber-600 transition-colors"
               >
                 Find Eggs Near Me
