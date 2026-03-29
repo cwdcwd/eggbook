@@ -1,21 +1,9 @@
 import { Users, Package, ShoppingCart, DollarSign } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
 import { db } from "@/lib/db";
-import { Prisma } from "@prisma/client";
-
 export const dynamic = 'force-dynamic';
 
-type OrderWithRelations = Prisma.OrderGetPayload<{
-  include: { buyer: true; listing: true };
-}>;
-
-async function getStats(): Promise<{
-  totalUsers: number;
-  totalSellers: number;
-  totalListings: number;
-  totalOrders: number;
-  recentOrders: OrderWithRelations[];
-}> {
+async function getStats() {
   const [totalUsers, totalSellers, totalListings, totalOrders] = await Promise.all([
     db.user.count(),
     db.sellerProfile.count(),

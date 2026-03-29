@@ -7,23 +7,11 @@ import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ListingCard } from "@/components/ListingCard";
 import { SellerActionButtons } from "@/components/SellerActionButtons";
-import { Prisma } from "@prisma/client";
-
 export const dynamic = 'force-dynamic';
 
-// Get the return type from the query for proper typing
-type SellerWithProfile = Prisma.UserGetPayload<{
-  include: {
-    sellerProfile: {
-      include: {
-        listings: { include: { tags: true } };
-        posts: true;
-      };
-    };
-  };
-}>;
+// Infer types from actual db query
 
-async function getSellerByUsername(username: string): Promise<SellerWithProfile | null> {
+async function getSellerByUsername(username: string) {
   console.log("Querying for username:", username);
   
   // Debug: Log all users

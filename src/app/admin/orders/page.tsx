@@ -1,16 +1,10 @@
 import { db } from "@/lib/db";
-import { Prisma } from "@prisma/client";
-
 export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { Eye, RefreshCw } from "lucide-react";
 
-type OrderWithRelations = Prisma.OrderGetPayload<{
-  include: { buyer: true; listing: true; seller: { include: { user: true } } };
-}>;
-
-async function getOrders(): Promise<OrderWithRelations[]> {
+async function getOrders() {
   return db.order.findMany({
     orderBy: { createdAt: "desc" },
     include: {
