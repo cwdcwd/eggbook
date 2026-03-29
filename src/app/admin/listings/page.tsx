@@ -1,11 +1,17 @@
 import Image from "next/image";
 import { db } from "@/lib/db";
+import type { EggListing, Tag, SellerProfile, User } from "@/lib/prisma-types";
 export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
+
+type ListingWithRelations = EggListing & {
+  seller: SellerProfile & { user: User };
+  tags: Tag[];
+};
 import { formatDate, formatPrice } from "@/lib/utils";
 import { Eye, Trash2, Flag } from "lucide-react";
 
-async function getListings() {
+async function getListings(): Promise<ListingWithRelations[]> {
   return db.eggListing.findMany({
     orderBy: { createdAt: "desc" },
     include: {
@@ -14,7 +20,7 @@ async function getListings() {
       },
       tags: true,
     },
-  });
+  }) as Promise<ListingWithRelations[]>;
 }
 
 export default async function AdminListingsPage() {

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
+import type { SellerMonthlyVolume } from "@/lib/prisma-types";
 export const dynamic = 'force-dynamic';
 import { formatPrice } from "@/lib/utils";
 type OrderStat = { status: string; _count: number };
@@ -27,17 +28,17 @@ async function getAnalytics(): Promise<Analytics> {
     },
   });
 
-  const totalRevenue = monthlyVolumes.reduce((sum, v) => sum + v.totalSales, 0);
+  const totalRevenue = monthlyVolumes.reduce((sum: number, v: SellerMonthlyVolume) => sum + v.totalSales, 0);
 
   // Fee tier distribution
   const tierCounts = {
-    FREE: monthlyVolumes.filter((v) => v.feeTier === "FREE").length,
-    STARTER: monthlyVolumes.filter((v) => v.feeTier === "STARTER").length,
-    PRO: monthlyVolumes.filter((v) => v.feeTier === "PRO").length,
+    FREE: monthlyVolumes.filter((v: SellerMonthlyVolume) => v.feeTier === "FREE").length,
+    STARTER: monthlyVolumes.filter((v: SellerMonthlyVolume) => v.feeTier === "STARTER").length,
+    PRO: monthlyVolumes.filter((v: SellerMonthlyVolume) => v.feeTier === "PRO").length,
   };
 
   // Calculate platform fees
-  const platformFees = monthlyVolumes.reduce((sum, v) => {
+  const platformFees = monthlyVolumes.reduce((sum: number, v: SellerMonthlyVolume) => {
     if (v.feeTier === "STARTER") return sum + v.totalSales * 0.02;
     if (v.feeTier === "PRO") return sum + v.totalSales * 0.03;
     return sum;

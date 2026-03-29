@@ -1,10 +1,17 @@
 import { db } from "@/lib/db";
+import type { Order, User, EggListing, SellerProfile } from "@/lib/prisma-types";
 export const dynamic = 'force-dynamic';
 import { Card, Badge, Button } from "@/components/ui";
 import { formatDate, formatPrice } from "@/lib/utils";
 import { Eye, RefreshCw } from "lucide-react";
 
-async function getOrders() {
+type OrderWithRelations = Order & {
+  buyer: User;
+  listing: EggListing;
+  seller: SellerProfile & { user: User };
+};
+
+async function getOrders(): Promise<OrderWithRelations[]> {
   return db.order.findMany({
     orderBy: { createdAt: "desc" },
     include: {
@@ -14,7 +21,7 @@ async function getOrders() {
         include: { user: true },
       },
     },
-  });
+  }) as Promise<OrderWithRelations[]>;
 }
 
 const STATUS_COLORS: Record<string, "default" | "success" | "warning" | "error" | "info"> = {

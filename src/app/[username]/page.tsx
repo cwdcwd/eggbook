@@ -7,11 +7,14 @@ import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ListingCard } from "@/components/ListingCard";
 import { SellerActionButtons } from "@/components/SellerActionButtons";
+import type { User, SellerProfile, EggListing, Tag, Post } from "@/lib/prisma-types";
 export const dynamic = 'force-dynamic';
 
-// Infer types from actual db query
+type ListingWithTags = EggListing & { tags: Tag[] };
+type SellerProfileWithRelations = SellerProfile & { listings: ListingWithTags[]; posts: Post[] };
+type UserWithProfile = User & { sellerProfile: SellerProfileWithRelations };
 
-async function getSellerByUsername(username: string) {
+async function getSellerByUsername(username: string): Promise<UserWithProfile | null> {
   console.log("Querying for username:", username);
   
   // Debug: Log all users
@@ -39,7 +42,7 @@ async function getSellerByUsername(username: string) {
   });
 
   if (!user?.sellerProfile) return null;
-  return user;
+  return user as UserWithProfile;
 }
 
 export default async function SellerProfilePage({
