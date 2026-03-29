@@ -81,7 +81,7 @@ export default async function AdminListingsPage() {
                       <div>
                         <p className="font-medium text-gray-900">{listing.title}</p>
                         <div className="flex gap-1 mt-1">
-                          {listing.tags.slice(0, 3).map((tag) => (
+                          {listing.tags.slice(0, 3).map((tag: Tag) => (
                             <Badge key={tag.id} variant="default" className="text-xs">
                               {tag.name}
                             </Badge>
