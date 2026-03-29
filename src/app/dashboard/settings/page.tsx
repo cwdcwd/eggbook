@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
-import { MapPin, CreditCard, Clock, Save } from "lucide-react";
+import { MapPin, CreditCard, Clock, Save, Check, AlertCircle } from "lucide-react";
 
 const PICKUP_TYPES = [
   { value: "TIMESLOT", label: "Specific Time Slots", description: "Buyers select from your available time slots" },
@@ -12,7 +12,9 @@ const PICKUP_TYPES = [
 
 export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   const [profile, setProfile] = useState({
     displayName: "",
@@ -25,13 +27,59 @@ export default function SettingsPage() {
     pickupType: "ARRANGED",
   });
 
+  // Load existing profile on mount
+  useEffect(() => {
+    async function loadSettings() {
+      setIsLoading(true);
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.sellerProfile) {
+            setProfile({
+              displayName: data.sellerProfile.displayName || "",
+              bio: data.sellerProfile.bio || "",
+              address: data.sellerProfile.address || "",
+              city: data.sellerProfile.city || "",
+              state: data.sellerProfile.state || "",
+              zip: data.sellerProfile.zip || "",
+              maxDeliveryDistance: data.sellerProfile.maxDeliveryDistance?.toString() || "",
+              pickupType: data.sellerProfile.pickupType || "ARRANGED",
+            });
+            setStripeConnected(data.sellerProfile.stripeOnboarded || false);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading settings:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
+
   const handleSave = async () => {
-    setIsLoading(true);
+    setIsSaving(true);
+    setMessage(null);
+    
     try {
-      // TODO: Save to API
-      console.log("Saving profile:", profile);
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+
+      if (res.ok) {
+        setMessage({ type: "success", text: "Settings saved successfully!" });
+      } else {
+        const data = await res.json();
+        setMessage({ type: "error", text: data.error || "Failed to save settings" });
+      }
+    } catch (error) {
+      console.error("Error saving settings:", error);
+      setMessage({ type: "error", text: "Failed to save settings" });
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
@@ -39,6 +87,14 @@ export default function SettingsPage() {
     // TODO: Redirect to Stripe Connect onboarding
     console.log("Connecting Stripe...");
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -207,11 +263,29 @@ export default function SettingsPage() {
       </Card>
 
       {/* Save Button */}
-      <div className="flex justify-end">
-        <Button onClick={handleSave} isLoading={isLoading}>
-          <Save className="w-4 h-4 mr-2" />
-          Save Changes
-        </Button>
+      <div className="space-y-4">
+        {message && (
+          <div
+            className={`flex items-center gap-2 p-4 rounded-lg ${
+              message.type === "success"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-800 border border-red-200"
+            }`}
+          >
+            {message.type === "success" ? (
+              <Check className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
+            )}
+            {message.text}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button onClick={handleSave} isLoading={isSaving}>
+            <Save className="w-4 h-4 mr-2" />
+            Save Changes
+          </Button>
+        </div>
       </div>
     </div>
   );

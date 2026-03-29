@@ -43,10 +43,18 @@ export default function MessagesPage() {
     async function fetchConversations() {
       try {
         const res = await fetch("/api/messages");
+        if (!res.ok) {
+          // User might not be synced to DB yet, or not logged in
+          console.error("Failed to fetch conversations:", res.status);
+          setConversations([]);
+          return;
+        }
         const data = await res.json();
-        setConversations(data);
+        // Ensure data is an array
+        setConversations(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error fetching conversations:", error);
+        setConversations([]);
       } finally {
         setIsLoading(false);
       }
@@ -62,10 +70,16 @@ export default function MessagesPage() {
 
       try {
         const res = await fetch(`/api/messages?conversationId=${selectedConversation.id}`);
+        if (!res.ok) {
+          console.error("Failed to fetch messages:", res.status);
+          setMessages([]);
+          return;
+        }
         const data = await res.json();
-        setMessages(data.messages || []);
+        setMessages(Array.isArray(data.messages) ? data.messages : []);
       } catch (error) {
         console.error("Error fetching messages:", error);
+        setMessages([]);
       }
     }
 

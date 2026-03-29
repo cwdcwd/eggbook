@@ -107,7 +107,8 @@ export async function GET(req: NextRequest) {
     });
 
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      // User not synced to database yet - return empty array
+      return NextResponse.json([]);
     }
 
     const { searchParams } = new URL(req.url);
