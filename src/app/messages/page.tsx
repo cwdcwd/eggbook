@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { Send, ArrowLeft, User } from "lucide-react";
+import { Send, ArrowLeft, User, Heart, Search, Home } from "lucide-react";
 import { Button, Input, Card } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
 import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
@@ -148,9 +148,34 @@ export default function MessagesPage() {
 
   return (
     <div className="min-h-screen bg-amber-50">
-      <div className="max-w-4xl mx-auto h-screen flex flex-col">
-        {/* Header */}
-        <header className="bg-white border-b border-amber-200 p-4 flex items-center gap-4">
+      {/* Site Header */}
+      <header className="bg-white border-b border-amber-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xl">🥚</span>
+              </div>
+              <span className="text-xl font-bold text-amber-900">Eggbook</span>
+            </Link>
+            <div className="flex items-center gap-4">
+              <Link href="/explore" className="text-amber-600 hover:text-amber-700">
+                <Search className="w-6 h-6" />
+              </Link>
+              <Link href="/favorites" className="text-amber-600 hover:text-amber-700">
+                <Heart className="w-6 h-6" />
+              </Link>
+              <Link href="/dashboard">
+                <Button variant="outline" size="sm">Dashboard</Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-4xl mx-auto h-[calc(100vh-64px)] flex flex-col">
+        {/* Page Title / Conversation Header */}
+        <div className="bg-white border-b border-amber-200 p-4 flex items-center gap-4">
           {selectedConversation ? (
             <>
               <button
@@ -171,7 +196,7 @@ export default function MessagesPage() {
           ) : (
             <h1 className="text-xl font-bold text-amber-900">Messages</h1>
           )}
-        </header>
+        </div>
 
         <div className="flex-1 flex overflow-hidden">
           {/* Conversation List */}

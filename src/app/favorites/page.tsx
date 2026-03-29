@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { Heart, MapPin, Trash2 } from "lucide-react";
+import { Heart, MapPin, Trash2, MessageSquare, Home, Search } from "lucide-react";
 import { Card, Button, Badge } from "@/components/ui";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
@@ -57,6 +57,31 @@ export default async function FavoritesPage() {
 
   return (
     <div className="min-h-screen bg-amber-50">
+      {/* Header */}
+      <header className="bg-white border-b border-amber-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xl">🥚</span>
+              </div>
+              <span className="text-xl font-bold text-amber-900">Eggbook</span>
+            </Link>
+            <div className="flex items-center gap-4">
+              <Link href="/explore" className="text-amber-600 hover:text-amber-700">
+                <Search className="w-6 h-6" />
+              </Link>
+              <Link href="/messages" className="text-amber-600 hover:text-amber-700">
+                <MessageSquare className="w-6 h-6" />
+              </Link>
+              <Link href="/dashboard">
+                <Button variant="outline" size="sm">Dashboard</Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </header>
+
       <div className="max-w-4xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-amber-900 mb-6">
           <Heart className="w-6 h-6 inline mr-2 text-amber-500" />

@@ -1,12 +1,13 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { MapPin, Clock, Heart, MessageSquare, ShoppingCart, Share2 } from "lucide-react";
+import { MapPin, Clock, Heart, MessageSquare, ShoppingCart, Share2, Search } from "lucide-react";
 import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ListingCard } from "@/components/ListingCard";
 import { SellerActionButtons } from "@/components/SellerActionButtons";
+import { auth } from "@clerk/nextjs/server";
 import type { User, SellerProfile, EggListing, Tag, Post } from "@/lib/prisma-types";
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,8 @@ export default async function SellerProfilePage({
   params: Promise<{ username: string }>;
 }) {
   const { username: rawUsername } = await params;
+  const { userId } = await auth();
+  
   // Remove @ if present and decode URL encoding
   const username = decodeURIComponent(rawUsername).replace(/^@/, "");
   console.log("Profile page - rawUsername:", rawUsername, "parsed username:", username);
@@ -62,6 +65,7 @@ export default async function SellerProfilePage({
   }
 
   const profile = seller.sellerProfile;
+  const isLoggedIn = !!userId;
 
   return (
     <div className="min-h-screen bg-amber-50">
@@ -76,9 +80,26 @@ export default async function SellerProfilePage({
               <span className="text-xl font-bold text-amber-900">Eggbook</span>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/sign-in">
-                <Button variant="outline" size="sm">Sign In</Button>
+              <Link href="/explore" className="text-amber-600 hover:text-amber-700">
+                <Search className="w-6 h-6" />
               </Link>
+              {isLoggedIn ? (
+                <>
+                  <Link href="/favorites" className="text-amber-600 hover:text-amber-700">
+                    <Heart className="w-6 h-6" />
+                  </Link>
+                  <Link href="/messages" className="text-amber-600 hover:text-amber-700">
+                    <MessageSquare className="w-6 h-6" />
+                  </Link>
+                  <Link href="/dashboard">
+                    <Button variant="outline" size="sm">Dashboard</Button>
+                  </Link>
+                </>
+              ) : (
+                <Link href="/sign-in">
+                  <Button variant="outline" size="sm">Sign In</Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>
