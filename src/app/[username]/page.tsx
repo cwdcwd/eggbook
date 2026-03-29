@@ -171,7 +171,7 @@ export default async function SellerProfilePage({
             </Card>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              {profile.listings.map((listing) => (
+              {profile.listings.map((listing: ListingWithTags) => (
                 <ListingCard
                   key={listing.id}
                   listing={{
@@ -183,7 +183,7 @@ export default async function SellerProfilePage({
                     customUnitName: listing.customUnitName,
                     stockCount: listing.stockCount,
                     photos: listing.photos,
-                    tags: listing.tags.map((t) => ({ id: t.id, name: t.name })),
+                    tags: listing.tags.map((t: Tag) => ({ id: t.id, name: t.name })),
                   }}
                   seller={{
                     displayName: profile.displayName,
@@ -203,7 +203,7 @@ export default async function SellerProfilePage({
               Recent Posts
             </h2>
             <div className="space-y-4">
-              {profile.posts.map((post) => (
+              {profile.posts.map((post: Post) => (
                 <Card key={post.id} className="p-4">
                   <p className="text-amber-700 whitespace-pre-wrap">
                     {post.content}

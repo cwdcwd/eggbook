@@ -18,4 +18,4 @@ export type {
   OrderStatus,
   FulfillmentType,
   FeeTier,
-} from ".prisma/client";
+} from "@prisma/client";
