@@ -1,11 +1,11 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Badge, Card, Button } from "@/components/ui";
 import { formatPrice, formatDate } from "@/lib/utils";
-import { Check, X, MessageSquare, Eye } from "lucide-react";
-
-// Placeholder - will be replaced with actual data fetching
-async function getOrders() {
-  return [];
-}
+import { Check, X, MessageSquare, Eye, Loader2 } from "lucide-react";
 
 const STATUS_BADGES: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
   PENDING: { variant: "warning", label: "Pending" },
@@ -16,8 +16,74 @@ const STATUS_BADGES: Record<string, { variant: "default" | "success" | "warning"
   DECLINED: { variant: "error", label: "Declined" },
 };
 
-export default async function OrdersPage() {
-  const orders = await getOrders();
+type Order = {
+  id: string;
+  quantity: number;
+  totalPrice: number;
+  status: string;
+  fulfillmentType: string;
+  createdAt: string;
+  listing: { title: string };
+  buyer: { username: string };
+};
+
+export default function OrdersPage() {
+  const router = useRouter();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("All");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const fetchOrders = async () => {
+    try {
+      const statusParam = filter !== "All" ? `&status=${filter.toUpperCase()}` : "";
+      const res = await fetch(`/api/orders?role=seller${statusParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrders(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch orders:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+  }, [filter]);
+
+  const handleAction = async (orderId: string, action: string) => {
+    setActionLoading(orderId);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Action failed");
+      }
+
+      // Refresh orders list
+      fetchOrders();
+    } catch (error) {
+      console.error("Action failed:", error);
+      alert(error instanceof Error ? error.message : "Action failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -28,13 +94,14 @@ export default async function OrdersPage() {
 
       {/* Filter Tabs */}
       <div className="flex gap-2 flex-wrap">
-        {["All", "Pending", "Confirmed", "Completed"].map((filter) => (
+        {["All", "Pending", "Confirmed", "Paid", "Completed"].map((f) => (
           <Button
-            key={filter}
-            variant={filter === "All" ? "primary" : "outline"}
+            key={f}
+            variant={filter === f ? "primary" : "outline"}
             size="sm"
+            onClick={() => setFilter(f)}
           >
-            {filter}
+            {f}
           </Button>
         ))}
       </div>
@@ -45,7 +112,7 @@ export default async function OrdersPage() {
             <Eye className="w-8 h-8 text-amber-600" />
           </div>
           <h3 className="text-lg font-semibold text-amber-900 mb-2">
-            No orders yet
+            {filter === "All" ? "No orders yet" : `No ${filter.toLowerCase()} orders`}
           </h3>
           <p className="text-amber-600 max-w-sm mx-auto">
             When buyers request orders for your eggs, they&apos;ll appear here.
@@ -53,7 +120,7 @@ export default async function OrdersPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {orders.map((order: any) => (
+          {orders.map((order) => (
             <Card key={order.id} className="p-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex-1">
@@ -66,7 +133,7 @@ export default async function OrdersPage() {
                     </Badge>
                   </div>
                   <p className="text-sm text-amber-600 mb-2">
-                    {order.listing?.title} × {order.quantity}
+                    {order.listing?.title} × {order.quantity} • from @{order.buyer?.username}
                   </p>
                   <div className="flex items-center gap-4 text-sm text-amber-500">
                     <span>{formatDate(order.createdAt)}</span>
@@ -77,31 +144,78 @@ export default async function OrdersPage() {
 
                 {order.status === "PENDING" && (
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline">
-                      <MessageSquare className="w-4 h-4 mr-1" />
-                      Message
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => handleAction(order.id, "decline")}
+                      disabled={actionLoading === order.id}
+                    >
+                      {actionLoading === order.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <X className="w-4 h-4 mr-1" />
+                          Decline
+                        </>
+                      )}
                     </Button>
-                    <Button size="sm" variant="danger">
-                      <X className="w-4 h-4 mr-1" />
-                      Decline
-                    </Button>
-                    <Button size="sm">
-                      <Check className="w-4 h-4 mr-1" />
-                      Confirm
+                    <Button
+                      size="sm"
+                      onClick={() => handleAction(order.id, "confirm")}
+                      disabled={actionLoading === order.id}
+                    >
+                      {actionLoading === order.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 mr-1" />
+                          Confirm
+                        </>
+                      )}
                     </Button>
                   </div>
                 )}
 
                 {order.status === "PAID" && (
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline">
-                      <MessageSquare className="w-4 h-4 mr-1" />
-                      Message
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
+                    <Button
+                      size="sm"
+                      onClick={() => handleAction(order.id, "complete")}
+                      disabled={actionLoading === order.id}
+                    >
+                      {actionLoading === order.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 mr-1" />
+                          Mark Complete
+                        </>
+                      )}
                     </Button>
-                    <Button size="sm">
-                      <Check className="w-4 h-4 mr-1" />
-                      Mark Complete
-                    </Button>
+                  </div>
+                )}
+
+                {order.status === "CONFIRMED" && (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-sm text-amber-600">Waiting for payment...</span>
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
                   </div>
                 )}
 

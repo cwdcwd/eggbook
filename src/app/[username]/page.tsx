@@ -5,6 +5,7 @@ import { MapPin, Clock, Heart, MessageSquare, ShoppingCart, Share2 } from "lucid
 import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { db } from "@/lib/db";
+import { ListingCard } from "@/components/ListingCard";
 import type { EggListing, Tag, Post, SellerProfile, User } from "@prisma/client";
 
 export const dynamic = 'force-dynamic';
@@ -167,47 +168,25 @@ export default async function SellerProfilePage({
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               {profile.listings.map((listing) => (
-                <Card key={listing.id} className="overflow-hidden">
-                  <div className="aspect-video relative bg-amber-100">
-                    {listing.photos?.[0] ? (
-                      <Image
-                        src={listing.photos[0]}
-                        alt={listing.title}
-                        fill
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-4xl">
-                        🥚
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <h3 className="font-semibold text-amber-900 mb-1">
-                      {listing.title}
-                    </h3>
-                    <p className="text-lg font-bold text-amber-600 mb-2">
-                      {formatPrice(listing.pricePerUnit)} /{" "}
-                      {getUnitDisplay(listing.unit, listing.customUnitName)}
-                    </p>
-                    {listing.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {listing.tags.map((tag) => (
-                          <Badge key={tag.id} variant="default">
-                            {tag.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                    <p className="text-sm text-amber-500 mb-4">
-                      {listing.stockCount} in stock
-                    </p>
-                    <Button className="w-full">
-                      <ShoppingCart className="w-4 h-4 mr-2" />
-                      Request Order
-                    </Button>
-                  </div>
-                </Card>
+                <ListingCard
+                  key={listing.id}
+                  listing={{
+                    id: listing.id,
+                    title: listing.title,
+                    description: listing.description,
+                    pricePerUnit: listing.pricePerUnit,
+                    unit: listing.unit,
+                    customUnitName: listing.customUnitName,
+                    stockCount: listing.stockCount,
+                    photos: listing.photos,
+                    tags: listing.tags.map((t) => ({ id: t.id, name: t.name })),
+                  }}
+                  seller={{
+                    displayName: profile.displayName,
+                    pickupType: profile.pickupType,
+                    maxDeliveryDistance: profile.maxDeliveryDistance,
+                  }}
+                />
               ))}
             </div>
           )}

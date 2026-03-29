@@ -3,10 +3,36 @@ import Image from "next/image";
 import { Plus, Edit, Trash2, MoreVertical } from "lucide-react";
 import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
+import { auth } from "@clerk/nextjs/server";
+import { db } from "@/lib/db";
+import { redirect } from "next/navigation";
+import { DeleteListingButton } from "@/components/DeleteListingButton";
 
-// Placeholder data - will be replaced with actual data fetching
 async function getListings() {
-  return [];
+  const { userId } = await auth();
+  if (!userId) {
+    redirect("/sign-in");
+  }
+
+  const user = await db.user.findUnique({
+    where: { clerkId: userId },
+    include: { sellerProfile: true },
+  });
+
+  if (!user?.sellerProfile) {
+    return [];
+  }
+
+  const listings = await db.eggListing.findMany({
+    where: { sellerId: user.sellerProfile.id },
+    include: {
+      tags: true,
+      _count: { select: { orders: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return listings;
 }
 
 export default async function ListingsPage() {
@@ -83,9 +109,7 @@ export default async function ListingsPage() {
                       Edit
                     </Button>
                   </Link>
-                  <Button variant="ghost" size="sm">
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </Button>
+                  <DeleteListingButton listingId={listing.id} />
                 </div>
               </div>
             </Card>

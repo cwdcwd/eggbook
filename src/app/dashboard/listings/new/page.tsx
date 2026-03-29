@@ -52,10 +52,31 @@ export default function NewListingPage() {
     const files = e.target.files;
     if (!files) return;
 
-    // In production, upload to Vercel Blob
-    // For now, create object URLs for preview
-    const newPhotos = Array.from(files).map((file) => URL.createObjectURL(file));
-    setPhotos((prev) => [...prev, ...newPhotos].slice(0, 5));
+    // Upload each file to Vercel Blob via our API
+    const uploadPromises = Array.from(files).map(async (file) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to upload photo");
+      }
+      
+      const { url } = await res.json();
+      return url;
+    });
+
+    try {
+      const uploadedUrls = await Promise.all(uploadPromises);
+      setPhotos((prev) => [...prev, ...uploadedUrls].slice(0, 5));
+    } catch (error) {
+      console.error("Failed to upload photos:", error);
+      alert("Failed to upload one or more photos. Please try again.");
+    }
   };
 
   const removePhoto = (index: number) => {
@@ -80,17 +101,31 @@ export default function NewListingPage() {
     setIsLoading(true);
 
     try {
-      // TODO: Submit to API
-      console.log({
-        ...formData,
-        pricingUnit,
-        photos,
-        tags: selectedTags,
+      const res = await fetch("/api/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: formData.title,
+          description: formData.description,
+          pricePerUnit: formData.pricePerUnit,
+          unit: pricingUnit,
+          customUnitName: formData.customUnitName,
+          customUnitQty: formData.customUnitQty,
+          stockCount: formData.stockCount,
+          photos,
+          tags: selectedTags,
+        }),
       });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to create listing");
+      }
 
       router.push("/dashboard/listings");
     } catch (error) {
       console.error("Failed to create listing:", error);
+      alert(error instanceof Error ? error.message : "Failed to create listing");
     } finally {
       setIsLoading(false);
     }
