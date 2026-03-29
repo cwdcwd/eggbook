@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -63,7 +64,14 @@ export default function RootLayout({
         <head>
           <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
         </head>
-        <body className="min-h-full flex flex-col bg-amber-50">{children}</body>
+        <body className="min-h-full flex flex-col bg-amber-50">
+          {children}
+          <Script
+            data-goatcounter="https://eggbook.goatcounter.com/count"
+            src="//gc.zgo.at/count.js"
+            strategy="afterInteractive"
+          />
+        </body>
       </html>
     </ClerkProvider>
   );
