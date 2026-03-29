@@ -1,8 +1,7 @@
 import Link from "next/link";
-import Image from "next/image";
 import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
-import { MapPin, MessageSquare, CreditCard, Search } from "lucide-react";
+import { Egg, MapPin, MessageSquare, CreditCard, Search } from "lucide-react";
 
 export default async function Home() {
   const { userId } = await auth();
@@ -14,8 +13,11 @@ export default async function Home() {
       <header className="bg-white border-b border-amber-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <Link href="/" className="flex items-center">
-              <Image src="/logo.png" alt="Addie's Egg Book" width={48} height={48} className="w-12 h-12" />
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
+                <Egg className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-xl font-bold text-amber-900">Eggbook</span>
             </Link>
             
             <nav className="flex items-center gap-4">
@@ -177,7 +179,10 @@ export default async function Home() {
           <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Image src="/logo.png" alt="Addie's Egg Book" width={32} height={32} className="w-8 h-8" />
+                <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center">
+                  <Egg className="w-4 h-4 text-white" />
+                </div>
+                <span className="text-lg font-bold text-white">Eggbook</span>
               </div>
               <p className="text-amber-200 text-sm">
                 Connecting local egg sellers with buyers since 2024.
