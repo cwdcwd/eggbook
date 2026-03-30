@@ -50,8 +50,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: onboardingUrl });
   } catch (error) {
     console.error("Error starting Stripe onboarding:", error);
+    const message = error instanceof Error ? error.message : "Failed to start Stripe onboarding";
     return NextResponse.json(
-      { error: "Failed to start Stripe onboarding" },
+      { error: message },
       { status: 500 }
     );
   }
@@ -76,9 +77,10 @@ export async function GET(req: NextRequest) {
 
     // Get account status from Stripe
     const status = await getAccountStatus(user.sellerProfile.stripeAccountId);
+    console.log("Stripe account status:", user.sellerProfile.stripeAccountId, status);
 
-    // Update onboarded status if needed
-    if (status.chargesEnabled && !user.sellerProfile.stripeOnboarded) {
+    // Update onboarded status if details are submitted (even if charges not yet enabled)
+    if (status.detailsSubmitted && !user.sellerProfile.stripeOnboarded) {
       await db.sellerProfile.update({
         where: { id: user.sellerProfile.id },
         data: { stripeOnboarded: true },
@@ -87,9 +89,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       connected: true,
-      onboarded: status.chargesEnabled && status.detailsSubmitted,
+      // Consider onboarded if details are submitted (charges may take time to enable)
+      onboarded: status.detailsSubmitted,
       chargesEnabled: status.chargesEnabled,
       payoutsEnabled: status.payoutsEnabled,
+      detailsSubmitted: status.detailsSubmitted,
     });
   } catch (error) {
     console.error("Error getting Stripe status:", error);

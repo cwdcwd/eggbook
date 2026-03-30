@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Plus, Edit, Trash2, MoreVertical } from "lucide-react";
+import { Plus, Edit, Trash2, MoreVertical, Crown } from "lucide-react";
 import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
 import { auth } from "@clerk/nextjs/server";
@@ -36,21 +36,52 @@ async function getListings() {
 }
 
 export default async function ListingsPage() {
+  const { has } = await auth();
+  const hasSellerSubscription = has({ feature: "create-listings" });
   const listings = await getListings();
 
   return (
     <div className="space-y-6">
+      {/* Subscription Banner for non-subscribers */}
+      {!hasSellerSubscription && (
+        <Card className="p-6 bg-gradient-to-r from-amber-100 to-amber-50 border-amber-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <Crown className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-amber-900">
+                  Subscribe to Create Listings
+                </h3>
+                <p className="text-amber-700 text-sm">
+                  Get a seller subscription to create unlimited egg listings and start selling.
+                </p>
+              </div>
+            </div>
+            <Link href="/pricing">
+              <Button>
+                <Crown className="w-4 h-4 mr-2" />
+                View Plans
+              </Button>
+            </Link>
+          </div>
+        </Card>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-amber-900">My Listings</h1>
           <p className="text-amber-600">Manage your egg listings</p>
         </div>
-        <Link href="/dashboard/listings/new">
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            New Listing
-          </Button>
-        </Link>
+        {hasSellerSubscription && (
+          <Link href="/dashboard/listings/new">
+            <Button>
+              <Plus className="w-4 h-4 mr-2" />
+              New Listing
+            </Button>
+          </Link>
+        )}
       </div>
 
       {listings.length === 0 ? (
@@ -62,11 +93,22 @@ export default async function ListingsPage() {
             No listings yet
           </h3>
           <p className="text-amber-600 mb-6 max-w-sm mx-auto">
-            Create your first egg listing to start selling to customers in your area.
+            {hasSellerSubscription 
+              ? "Create your first egg listing to start selling to customers in your area."
+              : "Subscribe to a seller plan to create listings and start selling."}
           </p>
-          <Link href="/dashboard/listings/new">
-            <Button>Create Your First Listing</Button>
-          </Link>
+          {hasSellerSubscription ? (
+            <Link href="/dashboard/listings/new">
+              <Button>Create Your First Listing</Button>
+            </Link>
+          ) : (
+            <Link href="/pricing">
+              <Button>
+                <Crown className="w-4 h-4 mr-2" />
+                View Plans
+              </Button>
+            </Link>
+          )}
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

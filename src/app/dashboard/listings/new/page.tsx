@@ -119,6 +119,11 @@ export default function NewListingPage() {
 
       if (!res.ok) {
         const error = await res.json();
+        // Redirect to pricing if subscription required
+        if (error.code === "SUBSCRIPTION_REQUIRED") {
+          router.push("/pricing");
+          return;
+        }
         throw new Error(error.error || "Failed to create listing");
       }
 

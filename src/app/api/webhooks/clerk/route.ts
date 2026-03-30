@@ -2,6 +2,11 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import {
+  handleSubscriptionActivation,
+  handleSubscriptionUpdate,
+  handleSubscriptionExpiry,
+} from "@/lib/subscription";
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -83,6 +88,57 @@ export async function POST(req: Request) {
         where: { clerkId: id },
       });
     }
+  }
+
+  // Subscription events (Clerk Billing)
+  // Note: Cast to unknown first since Clerk types may not include billing events
+  const eventData = evt.data as unknown;
+
+  if (eventType === "subscription.created" as string) {
+    const data = eventData as {
+      user_id: string;
+      id: string;
+      plan: { id: string; name: string; features?: { listing_limit?: number } };
+      current_period_end?: number;
+    };
+
+    const expiresAt = data.current_period_end ? new Date(data.current_period_end * 1000) : undefined;
+    const listingLimit = data.plan.features?.listing_limit;
+
+    await handleSubscriptionActivation(
+      data.user_id,
+      data.id,
+      data.plan.name || data.plan.id,
+      expiresAt,
+      listingLimit
+    );
+  }
+
+  if (eventType === "subscription.updated" as string) {
+    const data = eventData as {
+      user_id: string;
+      id: string;
+      plan: { id: string; name: string; features?: { listing_limit?: number } };
+      status: 'active' | 'canceled';
+      current_period_end?: number;
+    };
+
+    const expiresAt = data.current_period_end ? new Date(data.current_period_end * 1000) : undefined;
+    const listingLimit = data.plan.features?.listing_limit;
+
+    await handleSubscriptionUpdate(
+      data.user_id,
+      data.id,
+      data.plan.name || data.plan.id,
+      data.status,
+      expiresAt,
+      listingLimit
+    );
+  }
+
+  if (eventType === "subscription.deleted" as string) {
+    const data = eventData as { user_id: string };
+    await handleSubscriptionExpiry(data.user_id);
   }
 
   return new Response("OK", { status: 200 });
