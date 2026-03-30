@@ -20,6 +20,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Subscription fields (synced from Clerk)
+  subscriptionId        String?             // Clerk subscription ID
+  subscriptionPlan      String?             // Plan name (e.g., "seller_plan")
+  subscriptionStatus    SubscriptionStatus  @default(NONE)
+  subscriptionExpiresAt DateTime?           // When subscription ends
+  listingLimit          Int?                // Max listings allowed (null = unlimited)
+
   sellerProfile  SellerProfile?
   orders         Order[]         @relation("BuyerOrders")
   favorites      Favorite[]
@@ -32,6 +39,13 @@ enum UserRole {
   BUYER
   SELLER
   ADMIN
+}
+
+enum SubscriptionStatus {
+  NONE      // No subscription
+  ACTIVE    // Active and valid
+  CANCELED  // User canceled, may still be active until period ends
+  EXPIRED   // Subscription ended, listings hidden immediately
 }
 
 // Seller profile with location and pickup settings
@@ -76,20 +90,21 @@ enum PickupType {
 
 // Egg listing with flexible pricing
 model EggListing {
-  id             String   @id @default(cuid())
-  sellerId       String
-  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  title          String
-  description    String?
-  pricePerUnit   Float
-  unit           PricingUnit @default(DOZEN)
-  customUnitName String?
-  customUnitQty  Int?
-  stockCount     Int      @default(0)
-  isAvailable    Boolean  @default(true)
-  photos         String[] // Array of Vercel Blob URLs
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  sellerId               String
+  seller                 SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  title                  String
+  description            String?
+  pricePerUnit           Float
+  unit                   PricingUnit @default(DOZEN)
+  customUnitName         String?
+  customUnitQty          Int?
+  stockCount             Int      @default(0)
+  isAvailable            Boolean  @default(true)
+  hiddenBySubscription   Boolean  @default(false) // True if hidden due to subscription expiry
+  photos                 String[] // Array of Vercel Blob URLs
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   tags   Tag[]   @relation("ListingTags")
   orders Order[]

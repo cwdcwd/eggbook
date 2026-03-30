@@ -89,6 +89,7 @@ Use Clerk's `has()` function to check for features or subscription entitlements 
 
 ```typescript
 import { auth } from '@clerk/nextjs/server'
+import { canCreateListing } from '@/lib/subscription'
 
 export async function POST(req: NextRequest) {
   const { userId, has } = await auth()
@@ -96,8 +97,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Check for feature entitlement
-  const hasFeature = has({ feature: 'create-listings' })
+  // Quick DB check for subscription status and listing limits
+  const dbCheck = await canCreateListing(userId)
+  if (!dbCheck.allowed) {
+    return NextResponse.json(
+      { error: dbCheck.reason, code: dbCheck.code },
+      { status: 403 }
+    )
+  }
+
+  // Verify with Clerk's has() for the actual gate (authoritative check)
+  const hasFeature = has({ feature: 'listing' })
   if (!hasFeature) {
     return NextResponse.json(
       { error: 'Subscription required', code: 'SUBSCRIPTION_REQUIRED' },
@@ -108,9 +118,20 @@ export async function POST(req: NextRequest) {
 }
 ```
 
+**Subscription model:**
+- Dual check: DB for quick rejection + `has()` for authoritative verification
+- User model stores: `subscriptionId`, `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiresAt`, `listingLimit`
+- SubscriptionStatus enum: NONE, ACTIVE, CANCELED, EXPIRED
+- EggListing has `hiddenBySubscription` to track subscription-hidden listings
+
 **Key features to check:**
-- `create-listings` - Required for sellers to create egg listings
+- `listing` - Required for sellers to create egg listings (via `seller_plan`)
 - Configure features in Clerk Dashboard under "Features" or via subscription plans
+
+**Webhook events handled:**
+- `subscription.created` → Activate subscription, restore hidden listings
+- `subscription.updated` → Update status and plan details
+- `subscription.deleted` → Expire subscription, hide all listings immediately
 
 ### Styling
 - Use Tailwind CSS utility classes
@@ -119,9 +140,9 @@ export async function POST(req: NextRequest) {
 
 ## Key Data Models
 
-- **User**: Synced from Clerk, has role (BUYER/SELLER/ADMIN)
+- **User**: Synced from Clerk, has role (BUYER/SELLER/ADMIN), subscription fields (`subscriptionStatus`, `subscriptionPlan`, `listingLimit`)
 - **SellerProfile**: Seller info, location, payment settings, Stripe Connect
-- **EggListing**: Products with flexible pricing (per egg, half-dozen, dozen, custom)
+- **EggListing**: Products with flexible pricing, `hiddenBySubscription` for subscription tracking
 - **Order**: Purchase with fulfillment type (pickup/delivery)
 - **Conversation/Message**: Real-time messaging via Pusher
 - **Favorite**: Buyer bookmarks for sellers

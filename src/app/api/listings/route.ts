@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
+import { canCreateListing } from "@/lib/subscription";
 
 // Create a new listing
 export async function POST(req: NextRequest) {
@@ -12,9 +13,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check for seller subscription entitlement
-    const hasSellerSubscription = has({ feature: "create-listings" });
-    if (!hasSellerSubscription) {
+    // Quick DB check for subscription status and listing limits
+    const dbCheck = await canCreateListing(userId);
+    if (!dbCheck.allowed) {
+      return NextResponse.json(
+        { error: dbCheck.reason, code: dbCheck.code },
+        { status: 403 }
+      );
+    }
+
+    // Verify with Clerk's has() for the actual gate (authoritative check)
+    const hasListingFeature = has({ feature: "listing" });
+    if (!hasListingFeature) {
       return NextResponse.json(
         { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },
         { status: 403 }
