@@ -36,9 +36,9 @@ enum UserRole {
 
 // Seller profile with location and pickup settings
 model SellerProfile {
-  id                  String     @id @default(cuid())
-  userId              String     @unique
-  user                User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String        @id @default(cuid())
+  userId              String        @unique
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   displayName         String
   bio                 String?
   avatarUrl           String?
@@ -48,18 +48,24 @@ model SellerProfile {
   zip                 String?
   lat                 Float?
   lng                 Float?
-  maxDeliveryDistance Float?     // miles
-  pickupType          PickupType @default(ARRANGED)
-  pickupHours         Json?      // JSON object with day/time slots
-  isActive            Boolean    @default(true)
-  stripeAccountId     String?    // Stripe Connect account
-  stripeOnboarded     Boolean    @default(false)
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  maxDeliveryDistance Float?        // miles
+  pickupType          PickupType    @default(ARRANGED)
+  pickupHours         Json?         // JSON object with day/time slots
+  isActive            Boolean       @default(true)
+  paymentMethod       PaymentMethod @default(PLATFORM)
+  stripeAccountId     String?       // Stripe Connect account (only for OWN_STRIPE)
+  stripeOnboarded     Boolean       @default(false)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   listings EggListing[]
   orders   Order[]
   posts    Post[]
+}
+
+enum PaymentMethod {
+  PLATFORM    // Eggbook handles payments, pays out sellers
+  OWN_STRIPE  // Seller connects their own Stripe account
 }
 
 enum PickupType {

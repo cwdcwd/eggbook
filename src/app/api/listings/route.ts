@@ -7,9 +7,18 @@ import { getOrCreateUser } from "@/lib/auth";
 // Create a new listing
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Check for seller subscription entitlement
+    const hasSellerSubscription = has({ feature: "create-listings" });
+    if (!hasSellerSubscription) {
+      return NextResponse.json(
+        { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
     }
 
     // Get user with seller profile

@@ -57,6 +57,7 @@ export async function PUT(req: NextRequest) {
       zip,
       maxDeliveryDistance,
       pickupType,
+      paymentMethod,
     } = body;
 
     // Validate required fields
@@ -82,6 +83,7 @@ export async function PUT(req: NextRequest) {
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
         pickupType: pickupType || "ARRANGED",
+        paymentMethod: paymentMethod || "PLATFORM",
       },
       create: {
         userId: user.id,
@@ -94,6 +96,7 @@ export async function PUT(req: NextRequest) {
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
         pickupType: pickupType || "ARRANGED",
+        paymentMethod: paymentMethod || "PLATFORM",
       },
     });
 

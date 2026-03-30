@@ -20,6 +20,9 @@ function SettingsContent() {
   const [stripeStatus, setStripeStatus] = useState<{
     connected: boolean;
     onboarded: boolean;
+    chargesEnabled?: boolean;
+    payoutsEnabled?: boolean;
+    detailsSubmitted?: boolean;
   }>({ connected: false, onboarded: false });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
@@ -33,6 +36,7 @@ function SettingsContent() {
     zip: "",
     maxDeliveryDistance: "",
     pickupType: "ARRANGED",
+    paymentMethod: "PLATFORM",
   });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,6 +86,7 @@ function SettingsContent() {
               zip: data.sellerProfile.zip || "",
               maxDeliveryDistance: data.sellerProfile.maxDeliveryDistance?.toString() || "",
               pickupType: data.sellerProfile.pickupType || "ARRANGED",
+              paymentMethod: data.sellerProfile.paymentMethod || "PLATFORM",
             });
           }
         }
@@ -373,47 +378,115 @@ function SettingsContent() {
             <CardTitle>Payment Setup</CardTitle>
           </div>
         </CardHeader>
-        <CardContent>
-          {stripeStatus.onboarded ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Badge variant="success">Connected</Badge>
-                <span className="text-sm text-amber-600">
-                  Your Stripe account is ready to receive payments
-                </span>
+        <CardContent className="space-y-6">
+          {/* Payment Method Selection */}
+          <div className="space-y-4">
+            <label
+              className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                profile.paymentMethod === "PLATFORM"
+                  ? "border-amber-500 bg-amber-50"
+                  : "border-amber-200 hover:border-amber-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="paymentMethod"
+                value="PLATFORM"
+                checked={profile.paymentMethod === "PLATFORM"}
+                onChange={(e) =>
+                  setProfile((prev) => ({ ...prev, paymentMethod: e.target.value }))
+                }
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium text-amber-900">Eggbook Handles Payments</p>
+                <p className="text-sm text-amber-600">
+                  We collect payments from buyers and pay you out. Simplest option - no Stripe account needed.
+                </p>
               </div>
-              <Button variant="outline" size="sm" onClick={connectStripe}>
-                Manage
-              </Button>
-            </div>
-          ) : stripeStatus.connected ? (
-            <div className="text-center py-4">
-              <Badge variant="warning" className="mb-2">Setup Incomplete</Badge>
-              <p className="text-amber-600 mb-4">
-                Your Stripe account is connected but setup is incomplete.
-              </p>
-              <Button onClick={connectStripe} disabled={isConnectingStripe}>
-                {isConnectingStripe ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <CreditCard className="w-4 h-4 mr-2" />
-                )}
-                Complete Setup
-              </Button>
-            </div>
-          ) : (
-            <div className="text-center py-4">
-              <p className="text-amber-600 mb-4">
-                Connect your Stripe account to receive payments from buyers.
-              </p>
-              <Button onClick={connectStripe} disabled={isConnectingStripe}>
-                {isConnectingStripe ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <CreditCard className="w-4 h-4 mr-2" />
-                )}
-                Connect Stripe
-              </Button>
+            </label>
+            <label
+              className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                profile.paymentMethod === "OWN_STRIPE"
+                  ? "border-amber-500 bg-amber-50"
+                  : "border-amber-200 hover:border-amber-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="paymentMethod"
+                value="OWN_STRIPE"
+                checked={profile.paymentMethod === "OWN_STRIPE"}
+                onChange={(e) =>
+                  setProfile((prev) => ({ ...prev, paymentMethod: e.target.value }))
+                }
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium text-amber-900">Connect Your Own Stripe</p>
+                <p className="text-sm text-amber-600">
+                  Payments go directly to your Stripe account. You manage refunds and payouts.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {/* Stripe Connect UI (only shown if OWN_STRIPE selected) */}
+          {profile.paymentMethod === "OWN_STRIPE" && (
+            <div className="pt-4 border-t border-amber-200">
+              {stripeStatus.onboarded ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {stripeStatus.chargesEnabled ? (
+                      <>
+                        <Badge variant="success">Connected</Badge>
+                        <span className="text-sm text-amber-600">
+                          Your Stripe account is ready to receive payments
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Badge variant="warning">Pending Verification</Badge>
+                        <span className="text-sm text-amber-600">
+                          Stripe is verifying your account. Payments will be enabled soon.
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={connectStripe}>
+                    Manage
+                  </Button>
+                </div>
+              ) : stripeStatus.connected ? (
+                <div className="text-center py-4">
+                  <Badge variant="warning" className="mb-2">Setup Incomplete</Badge>
+                  <p className="text-amber-600 mb-4">
+                    Your Stripe account is connected but setup is incomplete.
+                  </p>
+                  <Button onClick={connectStripe} disabled={isConnectingStripe}>
+                    {isConnectingStripe ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <CreditCard className="w-4 h-4 mr-2" />
+                    )}
+                    Complete Setup
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <p className="text-amber-600 mb-4">
+                    Connect your Stripe account to receive payments directly.
+                  </p>
+                  <Button onClick={connectStripe} disabled={isConnectingStripe}>
+                    {isConnectingStripe ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <CreditCard className="w-4 h-4 mr-2" />
+                    )}
+                    Connect Stripe
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
