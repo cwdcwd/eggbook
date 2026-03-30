@@ -84,6 +84,34 @@ prisma/
 - Protect API routes with auth checks
 - User roles: BUYER, SELLER, ADMIN
 
+### Feature & Subscription Checks
+Use Clerk's `has()` function to check for features or subscription entitlements before allowing gated actions:
+
+```typescript
+import { auth } from '@clerk/nextjs/server'
+
+export async function POST(req: NextRequest) {
+  const { userId, has } = await auth()
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Check for feature entitlement
+  const hasFeature = has({ feature: 'create-listings' })
+  if (!hasFeature) {
+    return NextResponse.json(
+      { error: 'Subscription required', code: 'SUBSCRIPTION_REQUIRED' },
+      { status: 403 }
+    )
+  }
+  // ... proceed with action
+}
+```
+
+**Key features to check:**
+- `create-listings` - Required for sellers to create egg listings
+- Configure features in Clerk Dashboard under "Features" or via subscription plans
+
 ### Styling
 - Use Tailwind CSS utility classes
 - Use `clsx` and `tailwind-merge` (via `cn()` in utils) for conditional classes
