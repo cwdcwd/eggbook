@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 
@@ -17,6 +17,18 @@ export async function GET() {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    // Sync Clerk avatar to seller profile only if no avatar is set yet
+    let sellerProfile = user.sellerProfile;
+    if (sellerProfile && !sellerProfile.avatarUrl) {
+      const clerkUser = await currentUser();
+      if (clerkUser?.imageUrl) {
+        sellerProfile = await db.sellerProfile.update({
+          where: { id: sellerProfile.id },
+          data: { avatarUrl: clerkUser.imageUrl },
+        });
+      }
+    }
+
     return NextResponse.json({
       user: {
         id: user.id,
@@ -24,7 +36,7 @@ export async function GET() {
         email: user.email,
         role: user.role,
       },
-      sellerProfile: user.sellerProfile,
+      sellerProfile,
     });
   } catch (error) {
     console.error("Error fetching settings:", error);

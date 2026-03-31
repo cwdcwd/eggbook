@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
@@ -41,10 +41,14 @@ export async function POST(req: NextRequest) {
     // Auto-create seller profile if doesn't exist (upgrade to SELLER role)
     let sellerProfile = user.sellerProfile;
     if (!sellerProfile) {
+      // Get Clerk user for avatar
+      const clerkUser = await currentUser();
+      
       sellerProfile = await db.sellerProfile.create({
         data: {
           userId: user.id,
           displayName: user.username,
+          avatarUrl: clerkUser?.imageUrl || null,
         },
       });
 
