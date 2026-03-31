@@ -115,14 +115,29 @@ export async function POST(req: Request) {
       const paymentIntentId = charge.payment_intent as string;
 
       if (paymentIntentId) {
-        await db.order.updateMany({
+        // Find the order and restore stock
+        const order = await db.order.findFirst({
           where: { stripePaymentId: paymentIntentId },
-          data: {
-            status: "CANCELLED",
-            cancelledAt: new Date(),
-            cancelReason: "Refunded",
-          },
         });
+
+        if (order) {
+          await db.$transaction([
+            db.order.update({
+              where: { id: order.id },
+              data: {
+                status: "CANCELLED",
+                cancelledAt: new Date(),
+                cancelReason: "Refunded",
+              },
+            }),
+            db.eggListing.update({
+              where: { id: order.listingId },
+              data: {
+                stockCount: { increment: order.quantity },
+              },
+            }),
+          ]);
+        }
       }
       break;
     }

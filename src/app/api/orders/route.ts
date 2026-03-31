@@ -55,25 +55,36 @@ export async function POST(req: NextRequest) {
     const { feePercent } = calculateFeeTier(volume?.totalSales || 0);
     const platformFee = calculatePlatformFee(totalPrice, feePercent);
 
-    // Create order
-    const order = await db.order.create({
-      data: {
-        buyerId: buyer.id,
-        sellerId: listing.sellerId,
-        listingId: listing.id,
-        quantity,
-        totalPrice,
-        platformFee,
-        fulfillmentType,
-        pickupTime: pickupTime ? new Date(pickupTime) : null,
-        deliveryAddress,
-        deliveryLat,
-        deliveryLng,
-      },
-      include: {
-        listing: true,
-        buyer: true,
-      },
+    // Create order and decrement stock in a transaction
+    const order = await db.$transaction(async (tx) => {
+      // Decrement stock
+      await tx.eggListing.update({
+        where: { id: listingId },
+        data: {
+          stockCount: { decrement: quantity },
+        },
+      });
+
+      // Create order
+      return tx.order.create({
+        data: {
+          buyerId: buyer.id,
+          sellerId: listing.sellerId,
+          listingId: listing.id,
+          quantity,
+          totalPrice,
+          platformFee,
+          fulfillmentType,
+          pickupTime: pickupTime ? new Date(pickupTime) : null,
+          deliveryAddress,
+          deliveryLat,
+          deliveryLng,
+        },
+        include: {
+          listing: true,
+          buyer: true,
+        },
+      });
     });
 
     // Notify seller via Pusher
