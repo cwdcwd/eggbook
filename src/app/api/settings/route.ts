@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 
@@ -111,6 +111,21 @@ export async function PUT(req: NextRequest) {
         paymentMethod: paymentMethod || "PLATFORM",
       },
     });
+
+    // Sync avatar to Clerk profile if it changed
+    const previousAvatarUrl = user.sellerProfile?.avatarUrl;
+    if (avatarUrl && avatarUrl !== previousAvatarUrl) {
+      try {
+        const response = await fetch(avatarUrl);
+        const blob = await response.blob();
+        const file = new File([blob], "avatar.jpg", { type: blob.type });
+        const clerk = await clerkClient();
+        await clerk.users.updateUserProfileImage(userId, { file });
+      } catch (err) {
+        console.error("Failed to sync avatar to Clerk:", err);
+        // Don't fail the request if Clerk sync fails
+      }
+    }
 
     // Update user role to SELLER if not already
     if (user.role !== "SELLER" && user.role !== "ADMIN") {
