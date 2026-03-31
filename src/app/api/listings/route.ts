@@ -13,20 +13,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Quick DB check for subscription status and listing limits
-    const dbCheck = await canCreateListing(userId);
-    if (!dbCheck.allowed) {
-      return NextResponse.json(
-        { error: dbCheck.reason, code: dbCheck.code },
-        { status: 403 }
-      );
-    }
-
-    // Verify with Clerk's has() for the actual gate (authoritative check)
+    // Clerk's has() is the authoritative subscription check
     const hasListingFeature = has({ feature: "listing" });
     if (!hasListingFeature) {
       return NextResponse.json(
         { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
+    }
+
+    // DB check for listing limits only (not subscription status)
+    const dbCheck = await canCreateListing(userId);
+    if (!dbCheck.allowed) {
+      return NextResponse.json(
+        { error: dbCheck.reason, code: dbCheck.code },
         { status: 403 }
       );
     }

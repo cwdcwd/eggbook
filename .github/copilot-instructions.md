@@ -97,20 +97,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Quick DB check for subscription status and listing limits
-  const dbCheck = await canCreateListing(userId)
-  if (!dbCheck.allowed) {
-    return NextResponse.json(
-      { error: dbCheck.reason, code: dbCheck.code },
-      { status: 403 }
-    )
-  }
-
-  // Verify with Clerk's has() for the actual gate (authoritative check)
+  // Clerk's has() is the authoritative subscription check
   const hasFeature = has({ feature: 'listing' })
   if (!hasFeature) {
     return NextResponse.json(
       { error: 'Subscription required', code: 'SUBSCRIPTION_REQUIRED' },
+      { status: 403 }
+    )
+  }
+
+  // DB check for listing limits only (not subscription status)
+  const dbCheck = await canCreateListing(userId)
+  if (!dbCheck.allowed) {
+    return NextResponse.json(
+      { error: dbCheck.reason, code: dbCheck.code },
       { status: 403 }
     )
   }
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
 ```
 
 **Subscription model:**
-- Dual check: DB for quick rejection + `has()` for authoritative verification
+- `has()` first for authoritative subscription check, then DB for limits only
 - User model stores: `subscriptionId`, `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiresAt`, `listingLimit`
 - SubscriptionStatus enum: NONE, ACTIVE, CANCELED, EXPIRED
 - EggListing has `hiddenBySubscription` to track subscription-hidden listings
