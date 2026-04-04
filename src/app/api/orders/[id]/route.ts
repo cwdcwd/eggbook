@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -128,31 +129,49 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Update order
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: {
-        status: transition.toStatus,
-        ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
-        ...(action === "decline" && { cancelReason }),
-        ...(action === "complete" && { completedAt: new Date() }),
-      },
-      include: {
-        listing: true,
-        buyer: true,
-        seller: { include: { user: true } },
-      },
-    });
+    // Determine actor type
+    const actorType = isSeller ? "SELLER" : "BUYER";
 
-    // If declined or cancelled, restore stock
-    if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
-      await db.eggListing.update({
-        where: { id: order.listingId },
+    // Update order and log status change in transaction
+    const updatedOrder = await db.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id },
         data: {
-          stockCount: { increment: order.quantity },
+          status: transition.toStatus,
+          ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
+          ...(action === "decline" && { cancelReason }),
+          ...(action === "complete" && { completedAt: new Date() }),
+        },
+        include: {
+          listing: true,
+          buyer: true,
+          seller: { include: { user: true } },
         },
       });
-    }
+
+      // If declined or cancelled, restore stock
+      if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
+        await tx.eggListing.update({
+          where: { id: order.listingId },
+          data: {
+            stockCount: { increment: order.quantity },
+          },
+        });
+      }
+
+      // Log status change to audit trail
+      await logOrderStatusChange({
+        orderId: id,
+        fromStatus: order.status,
+        toStatus: transition.toStatus,
+        changedBy: userId,
+        changedByType: actorType,
+        reason: cancelReason || null,
+        tx,
+      });
+
+      return updated;
+    });
 
     return NextResponse.json(updatedOrder);
   } catch (error) {

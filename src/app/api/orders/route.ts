@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
 import { getOrCreateUser } from "@/lib/auth";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -75,7 +76,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Create order (auto-confirm if seller has autoAcceptOrders enabled)
-      return tx.order.create({
+      const initialStatus = listing.seller.autoAcceptOrders ? "CONFIRMED" : "PENDING";
+      const newOrder = await tx.order.create({
         data: {
           buyerId: buyer.id,
           sellerId: listing.sellerId,
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
           totalPrice,
           platformFee,
           fulfillmentType,
-          status: listing.seller.autoAcceptOrders ? "CONFIRMED" : "PENDING",
+          status: initialStatus,
           pickupTime: pickupTime ? new Date(pickupTime) : null,
           deliveryAddress,
           deliveryLat,
@@ -95,6 +97,19 @@ export async function POST(req: NextRequest) {
           buyer: true,
         },
       });
+
+      // Log initial status to audit trail
+      await logOrderStatusChange({
+        orderId: newOrder.id,
+        fromStatus: null,
+        toStatus: initialStatus,
+        changedBy: userId,
+        changedByType: "BUYER",
+        reason: listing.seller.autoAcceptOrders ? "Auto-accepted by seller settings" : null,
+        tx,
+      });
+
+      return newOrder;
     });
 
     // Notify seller via Pusher
