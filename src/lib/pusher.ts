@@ -66,6 +66,10 @@ export async function triggerNewMessage(
     content: string
     senderId: string
     createdAt: Date
+    sender?: {
+      id: string
+      username: string
+    }
   }
 ) {
   if (!pusherServer) return

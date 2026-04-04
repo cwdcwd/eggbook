@@ -100,6 +100,10 @@ export async function POST(req: NextRequest) {
       content: message.content,
       senderId: message.senderId,
       createdAt: message.createdAt,
+      sender: {
+        id: message.sender.id,
+        username: message.sender.username,
+      },
     });
 
     return NextResponse.json(message);
