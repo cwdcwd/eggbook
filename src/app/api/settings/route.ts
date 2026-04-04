@@ -81,6 +81,7 @@ export async function PUT(req: NextRequest) {
       maxDeliveryDistance,
       pickupType,
       paymentMethod,
+      autoAcceptOrders,
     } = body;
 
     // Validate required fields
@@ -107,6 +108,7 @@ export async function PUT(req: NextRequest) {
         maxDeliveryDistance: maxDeliveryDistanceFloat,
         pickupType: pickupType || "ARRANGED",
         paymentMethod: paymentMethod || "PLATFORM",
+        autoAcceptOrders: autoAcceptOrders ?? true,
       },
       create: {
         userId: user.id,
@@ -120,6 +122,7 @@ export async function PUT(req: NextRequest) {
         maxDeliveryDistance: maxDeliveryDistanceFloat,
         pickupType: pickupType || "ARRANGED",
         paymentMethod: paymentMethod || "PLATFORM",
+        autoAcceptOrders: autoAcceptOrders ?? true,
       },
     });
 

@@ -66,6 +66,7 @@ model SellerProfile {
   pickupType          PickupType    @default(ARRANGED)
   pickupHours         Json?         // JSON object with day/time slots
   isActive            Boolean       @default(true)
+  autoAcceptOrders    Boolean       @default(true) // Auto-confirm orders (false = manual confirmation required)
   paymentMethod       PaymentMethod @default(PLATFORM)
   stripeAccountId     String?       // Stripe Connect account (only for OWN_STRIPE)
   stripeOnboarded     Boolean       @default(false)

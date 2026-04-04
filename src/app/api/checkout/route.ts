@@ -51,21 +51,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check seller has Stripe connected (skip in dev if STRIPE_CONNECT_ENABLED=false)
-    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED !== 'false'
-    if (connectEnabled && (!order.seller.stripeAccountId || !order.seller.stripeOnboarded)) {
-      return NextResponse.json(
-        { error: "Seller has not completed payment setup" },
-        { status: 400 }
-      );
-    }
-
     // Create Stripe checkout session
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const amountInCents = Math.round(order.totalPrice * 100);
     const platformFeeInCents = Math.round(order.platformFee * 100);
 
     // Use seller's Stripe account if Connect is enabled and they're onboarded
+    // Falls back to direct payment in createCheckoutSession if seller lacks capabilities
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED !== 'false'
     const sellerAccount = connectEnabled && order.seller.stripeOnboarded 
       ? order.seller.stripeAccountId 
       : null;

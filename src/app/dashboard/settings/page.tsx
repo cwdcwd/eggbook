@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
-import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X } from "lucide-react";
+import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X, ShoppingCart } from "lucide-react";
 
 const PICKUP_TYPES = [
   { value: "TIMESLOT", label: "Specific Time Slots", description: "Buyers select from your available time slots" },
@@ -37,6 +37,7 @@ function SettingsContent() {
     maxDeliveryDistance: "",
     pickupType: "ARRANGED",
     paymentMethod: "PLATFORM",
+    autoAcceptOrders: true,
   });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,6 +88,7 @@ function SettingsContent() {
               maxDeliveryDistance: data.sellerProfile.maxDeliveryDistance?.toString() || "",
               pickupType: data.sellerProfile.pickupType || "ARRANGED",
               paymentMethod: data.sellerProfile.paymentMethod || "PLATFORM",
+              autoAcceptOrders: data.sellerProfile.autoAcceptOrders ?? true,
             });
           }
         }
@@ -330,6 +332,41 @@ function SettingsContent() {
             }
             hint="Leave empty for pickup only"
           />
+        </CardContent>
+      </Card>
+
+      {/* Order Preferences */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <ShoppingCart className="w-5 h-5 text-amber-500" />
+            <CardTitle>Order Preferences</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label
+            className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+              profile.autoAcceptOrders
+                ? "border-amber-500 bg-amber-50"
+                : "border-amber-200 hover:border-amber-300"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={profile.autoAcceptOrders}
+              onChange={(e) =>
+                setProfile((prev) => ({ ...prev, autoAcceptOrders: e.target.checked }))
+              }
+              className="mt-1 w-5 h-5 text-amber-500 rounded border-amber-300 focus:ring-amber-500"
+            />
+            <div>
+              <p className="font-medium text-amber-900">Auto-Accept Orders</p>
+              <p className="text-sm text-amber-600">
+                Automatically confirm incoming orders so buyers can pay immediately. 
+                If disabled, you&apos;ll need to manually confirm each order before buyers can checkout.
+              </p>
+            </div>
+          </label>
         </CardContent>
       </Card>
 

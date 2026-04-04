@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
         throw new Error("INSUFFICIENT_STOCK");
       }
 
-      // Create order
+      // Create order (auto-confirm if seller has autoAcceptOrders enabled)
       return tx.order.create({
         data: {
           buyerId: buyer.id,
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
           totalPrice,
           platformFee,
           fulfillmentType,
+          status: listing.seller.autoAcceptOrders ? "CONFIRMED" : "PENDING",
           pickupTime: pickupTime ? new Date(pickupTime) : null,
           deliveryAddress,
           deliveryLat,
