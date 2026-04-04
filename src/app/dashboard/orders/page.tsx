@@ -20,11 +20,17 @@ type Order = {
   id: string;
   quantity: number;
   totalPrice: number;
+  platformFee: number;
   status: string;
   fulfillmentType: string;
+  pickupTime: string | null;
+  deliveryAddress: string | null;
   createdAt: string;
-  listing: { title: string };
-  buyer: { username: string };
+  paidAt: string | null;
+  completedAt: string | null;
+  cancelReason: string | null;
+  listing: { title: string; pricePerUnit: number };
+  buyer: { username: string; email: string };
 };
 
 export default function OrdersPage() {
@@ -33,6 +39,7 @@ export default function OrdersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<string>("All");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   const fetchOrders = async () => {
     try {
@@ -220,7 +227,7 @@ export default function OrdersPage() {
                 )}
 
                 {(order.status === "COMPLETED" || order.status === "CANCELLED" || order.status === "DECLINED") && (
-                  <Button size="sm" variant="ghost">
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedOrder(order)}>
                     <Eye className="w-4 h-4 mr-1" />
                     View Details
                   </Button>
@@ -228,6 +235,93 @@ export default function OrdersPage() {
               </div>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedOrder(null)}>
+          <Card className="max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-amber-900">Order #{selectedOrder.id.slice(-6)}</h2>
+                <Badge variant={STATUS_BADGES[selectedOrder.status]?.variant || "default"} className="mt-1">
+                  {STATUS_BADGES[selectedOrder.status]?.label || selectedOrder.status}
+                </Badge>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedOrder(null)}>
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium text-amber-500 mb-1">Item</h3>
+                <p className="text-amber-900">{selectedOrder.listing?.title}</p>
+                <p className="text-sm text-amber-600">
+                  {selectedOrder.quantity} × {formatPrice(selectedOrder.listing?.pricePerUnit || 0)}
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-medium text-amber-500 mb-1">Buyer</h3>
+                <p className="text-amber-900">@{selectedOrder.buyer?.username}</p>
+                <p className="text-sm text-amber-600">{selectedOrder.buyer?.email}</p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-medium text-amber-500 mb-1">Fulfillment</h3>
+                <p className="text-amber-900 capitalize">{selectedOrder.fulfillmentType.toLowerCase()}</p>
+                {selectedOrder.deliveryAddress && (
+                  <p className="text-sm text-amber-600">{selectedOrder.deliveryAddress}</p>
+                )}
+                {selectedOrder.pickupTime && (
+                  <p className="text-sm text-amber-600">Pickup: {formatDate(selectedOrder.pickupTime)}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Total</h3>
+                  <p className="text-amber-900 font-semibold">{formatPrice(selectedOrder.totalPrice)}</p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Platform Fee</h3>
+                  <p className="text-amber-900">{formatPrice(selectedOrder.platformFee)}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Ordered</h3>
+                  <p className="text-amber-600">{formatDate(selectedOrder.createdAt)}</p>
+                </div>
+                {selectedOrder.paidAt && (
+                  <div>
+                    <h3 className="text-sm font-medium text-amber-500 mb-1">Paid</h3>
+                    <p className="text-amber-600">{formatDate(selectedOrder.paidAt)}</p>
+                  </div>
+                )}
+                {selectedOrder.completedAt && (
+                  <div>
+                    <h3 className="text-sm font-medium text-amber-500 mb-1">Completed</h3>
+                    <p className="text-amber-600">{formatDate(selectedOrder.completedAt)}</p>
+                  </div>
+                )}
+              </div>
+
+              {selectedOrder.cancelReason && (
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Reason</h3>
+                  <p className="text-amber-600">{selectedOrder.cancelReason}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <Button variant="outline" onClick={() => setSelectedOrder(null)}>Close</Button>
+            </div>
+          </Card>
         </div>
       )}
     </div>
