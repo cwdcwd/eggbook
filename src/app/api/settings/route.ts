@@ -159,7 +159,8 @@ export async function PUT(req: NextRequest) {
         }
         
         const file = new File([blob], "avatar.jpg", { type: blob.type });
-        await clerkClient.users.updateUserProfileImage(userId, { file });
+        const clerk = await clerkClient();
+        await clerk.users.updateUserProfileImage(userId, { file });
       } catch (err) {
         console.error("Failed to sync avatar to Clerk:", err);
         // Don't fail the request if Clerk sync fails
