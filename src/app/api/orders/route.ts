@@ -55,15 +55,24 @@ export async function POST(req: NextRequest) {
     const { feePercent } = calculateFeeTier(volume?.totalSales || 0);
     const platformFee = calculatePlatformFee(totalPrice, feePercent);
 
-    // Create order and decrement stock in a transaction
+    // Create order and decrement stock in a transaction (with atomic check)
     const order = await db.$transaction(async (tx) => {
-      // Decrement stock
-      await tx.eggListing.update({
-        where: { id: listingId },
+      // Atomically decrement stock only if sufficient quantity exists
+      const updateResult = await tx.eggListing.updateMany({
+        where: {
+          id: listingId,
+          stockCount: { gte: quantity },
+          isAvailable: true,
+        },
         data: {
           stockCount: { decrement: quantity },
         },
       });
+
+      // Verify stock was actually decremented (handles race condition)
+      if (updateResult.count === 0) {
+        throw new Error("INSUFFICIENT_STOCK");
+      }
 
       // Create order
       return tx.order.create({
@@ -98,6 +107,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(order);
   } catch (error) {
+    // Handle race condition error gracefully
+    if (error instanceof Error && error.message === "INSUFFICIENT_STOCK") {
+      return NextResponse.json({ error: "Not enough stock" }, { status: 400 });
+    }
     console.error("Error creating order:", error);
     return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
   }

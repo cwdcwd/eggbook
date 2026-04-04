@@ -3,6 +3,17 @@ import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 
+// Allowed URL patterns for avatar sync (SSRF protection)
+const ALLOWED_AVATAR_PATTERNS = [
+  /^https:\/\/[a-z0-9-]+\.blob\.vercel-storage\.com\/.+$/i, // Vercel Blob
+  /^https:\/\/images\.clerk\.dev\/.+$/i, // Clerk images
+  /^https:\/\/img\.clerk\.com\/.+$/i, // Clerk images (alternate)
+];
+
+function isAllowedAvatarUrl(url: string): boolean {
+  return ALLOWED_AVATAR_PATTERNS.some((pattern) => pattern.test(url));
+}
+
 // Get current user's seller profile
 export async function GET() {
   try {
@@ -112,15 +123,14 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    // Sync avatar to Clerk profile if it changed
+    // Sync avatar to Clerk profile if it changed (with SSRF protection)
     const previousAvatarUrl = user.sellerProfile?.avatarUrl;
-    if (avatarUrl && avatarUrl !== previousAvatarUrl) {
+    if (avatarUrl && avatarUrl !== previousAvatarUrl && isAllowedAvatarUrl(avatarUrl)) {
       try {
         const response = await fetch(avatarUrl);
         const blob = await response.blob();
         const file = new File([blob], "avatar.jpg", { type: blob.type });
-        const clerk = await clerkClient();
-        await clerk.users.updateUserProfileImage(userId, { file });
+        await clerkClient.users.updateUserProfileImage(userId, { file });
       } catch (err) {
         console.error("Failed to sync avatar to Clerk:", err);
         // Don't fail the request if Clerk sync fails

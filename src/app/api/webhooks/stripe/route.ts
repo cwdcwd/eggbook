@@ -115,9 +115,12 @@ export async function POST(req: Request) {
       const paymentIntentId = charge.payment_intent as string;
 
       if (paymentIntentId) {
-        // Find the order and restore stock
+        // Find the order that hasn't been cancelled yet (idempotency guard)
         const order = await db.order.findFirst({
-          where: { stripePaymentId: paymentIntentId },
+          where: {
+            stripePaymentId: paymentIntentId,
+            status: { not: "CANCELLED" }, // Only process if not already cancelled
+          },
         });
 
         if (order) {
