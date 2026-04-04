@@ -167,7 +167,7 @@ export default function OrdersPage() {
 
       {/* Filter Tabs */}
       <div className="flex gap-2 flex-wrap">
-        {["All", "Pending", "Confirmed", "Paid", "Completed"].map((f) => (
+        {["All", "Pending", "Confirmed", "Paid", "Completed", "Cancelled", "Declined"].map((f) => (
           <Button
             key={f}
             variant={filter === f ? "primary" : "outline"}
