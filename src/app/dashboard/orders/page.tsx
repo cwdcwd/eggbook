@@ -39,7 +39,8 @@ type Order = {
   completedAt: string | null;
   cancelReason: string | null;
   listing: { title: string; pricePerUnit: number };
-  buyer: { username: string; email: string };
+  buyer?: { username: string; email: string };
+  seller?: { displayName: string; user: { username: string } };
 };
 
 type StatusHistoryEntry = {
@@ -52,6 +53,8 @@ type StatusHistoryEntry = {
   createdAt: string;
 };
 
+type ViewRole = "seller" | "buyer";
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,11 +64,39 @@ export default function OrdersPage() {
   const [orderHistory, setOrderHistory] = useState<StatusHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState<string | null>(null);
+  const [viewRole, setViewRole] = useState<ViewRole>("seller");
+  const [hasSeller, setHasSeller] = useState<boolean | null>(null); // null = loading
+
+  // Check if user has seller profile
+  useEffect(() => {
+    async function checkSellerProfile() {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          const isSeller = !!data.sellerProfile;
+          setHasSeller(isSeller);
+          // Default to buyer view if no seller profile
+          if (!isSeller) {
+            setViewRole("buyer");
+          }
+        } else {
+          setHasSeller(false);
+          setViewRole("buyer");
+        }
+      } catch {
+        setHasSeller(false);
+        setViewRole("buyer");
+      }
+    }
+    checkSellerProfile();
+  }, []);
 
   const fetchOrders = useCallback(async () => {
+    if (hasSeller === null) return; // Wait for seller check to complete
     try {
       const statusParam = filter !== "All" ? `&status=${filter.toUpperCase()}` : "";
-      const res = await fetch(`/api/orders?role=seller${statusParam}`);
+      const res = await fetch(`/api/orders?role=${viewRole}${statusParam}`);
       if (res.ok) {
         const data = await res.json();
         setOrders(Array.isArray(data) ? data : []);
@@ -75,7 +106,7 @@ export default function OrdersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [filter]);
+  }, [filter, viewRole, hasSeller]);
 
   const fetchOrderHistory = useCallback(async (orderId: string) => {
     setHistoryLoading(true);
@@ -150,7 +181,7 @@ export default function OrdersPage() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || hasSeller === null) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
@@ -160,9 +191,41 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-amber-900">Orders</h1>
-        <p className="text-amber-600">Manage incoming orders from buyers</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-amber-900">Orders</h1>
+          <p className="text-amber-600">
+            {viewRole === "seller" 
+              ? "Manage incoming orders from buyers" 
+              : "View your purchase history"}
+          </p>
+        </div>
+        
+        {/* Role toggle for users with seller profiles */}
+        {hasSeller && (
+          <div className="flex gap-2 bg-amber-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewRole("seller")}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                viewRole === "seller"
+                  ? "bg-white text-amber-900 shadow-sm"
+                  : "text-amber-600 hover:text-amber-900"
+              }`}
+            >
+              Selling
+            </button>
+            <button
+              onClick={() => setViewRole("buyer")}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                viewRole === "buyer"
+                  ? "bg-white text-amber-900 shadow-sm"
+                  : "text-amber-600 hover:text-amber-900"
+              }`}
+            >
+              Buying
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter Tabs */}
@@ -188,13 +251,15 @@ export default function OrdersPage() {
             {filter === "All" ? "No orders yet" : `No ${filter.toLowerCase()} orders`}
           </h3>
           <p className="text-amber-600 max-w-sm mx-auto">
-            When buyers request orders for your eggs, they&apos;ll appear here.
+            {viewRole === "seller"
+              ? "When buyers request orders for your eggs, they'll appear here."
+              : "Your purchases will appear here."}
           </p>
         </Card>
       ) : (
         <div className="space-y-4">
           {orders.map((order) => {
-            const availableTransitions = SELLER_TRANSITIONS[order.status] || [];
+            const availableTransitions = viewRole === "seller" ? (SELLER_TRANSITIONS[order.status] || []) : [];
             const hasTransitions = availableTransitions.length > 0;
 
             return (
@@ -242,7 +307,11 @@ export default function OrdersPage() {
                     </div>
                   </div>
                   <p className="text-sm text-amber-600 mb-2">
-                    {order.listing?.title} × {order.quantity} • from @{order.buyer?.username}
+                    {order.listing?.title} × {order.quantity} • 
+                    {viewRole === "seller" 
+                      ? ` from @${order.buyer?.username}`
+                      : ` from @${order.seller?.user?.username || order.seller?.displayName}`
+                    }
                   </p>
                   <div className="flex items-center gap-4 text-sm text-amber-500">
                     <span>{formatDate(order.createdAt)}</span>
@@ -251,7 +320,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {order.status === "PENDING" && (
+                {order.status === "PENDING" && viewRole === "seller" && (
                   <div className="flex gap-2">
                     <Link href={`/messages?order=${order.id}`}>
                       <Button size="sm" variant="outline">
@@ -291,7 +360,7 @@ export default function OrdersPage() {
                   </div>
                 )}
 
-                {order.status === "PAID" && (
+                {order.status === "PAID" && viewRole === "seller" && (
                   <div className="flex gap-2">
                     <Link href={`/messages?order=${order.id}`}>
                       <Button size="sm" variant="outline">
@@ -316,9 +385,52 @@ export default function OrdersPage() {
                   </div>
                 )}
 
-                {order.status === "CONFIRMED" && (
+                {order.status === "CONFIRMED" && viewRole === "seller" && (
                   <div className="flex gap-2 items-center">
                     <span className="text-sm text-amber-600">Waiting for payment...</span>
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {/* Buyer view: show pay button for confirmed orders */}
+                {order.status === "CONFIRMED" && viewRole === "buyer" && (
+                  <div className="flex gap-2 items-center">
+                    <Link href={`/checkout/${order.id}`}>
+                      <Button size="sm">
+                        Pay Now
+                      </Button>
+                    </Link>
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {/* Buyer view: show message for pending orders */}
+                {order.status === "PENDING" && viewRole === "buyer" && (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-sm text-amber-600">Waiting for seller...</span>
+                    <Link href={`/messages?order=${order.id}`}>
+                      <Button size="sm" variant="outline">
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        Message
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {/* Buyer view: show message for paid orders */}
+                {order.status === "PAID" && viewRole === "buyer" && (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-sm text-amber-600">Awaiting fulfillment...</span>
                     <Link href={`/messages?order=${order.id}`}>
                       <Button size="sm" variant="outline">
                         <MessageSquare className="w-4 h-4 mr-1" />
@@ -373,11 +485,20 @@ export default function OrdersPage() {
                 </p>
               </div>
 
-              <div>
-                <h3 className="text-sm font-medium text-amber-500 mb-1">Buyer</h3>
-                <p className="text-amber-900">@{selectedOrder.buyer?.username}</p>
-                <p className="text-sm text-amber-600">{selectedOrder.buyer?.email}</p>
-              </div>
+              {viewRole === "seller" && selectedOrder.buyer && (
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Buyer</h3>
+                  <p className="text-amber-900">@{selectedOrder.buyer.username}</p>
+                  <p className="text-sm text-amber-600">{selectedOrder.buyer.email}</p>
+                </div>
+              )}
+
+              {viewRole === "buyer" && selectedOrder.seller && (
+                <div>
+                  <h3 className="text-sm font-medium text-amber-500 mb-1">Seller</h3>
+                  <p className="text-amber-900">@{selectedOrder.seller.user?.username || selectedOrder.seller.displayName}</p>
+                </div>
+              )}
 
               <div>
                 <h3 className="text-sm font-medium text-amber-500 mb-1">Fulfillment</h3>
@@ -390,15 +511,17 @@ export default function OrdersPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className={viewRole === "seller" ? "grid grid-cols-2 gap-4" : ""}>
                 <div>
                   <h3 className="text-sm font-medium text-amber-500 mb-1">Total</h3>
                   <p className="text-amber-900 font-semibold">{formatPrice(selectedOrder.totalPrice)}</p>
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-amber-500 mb-1">Platform Fee</h3>
-                  <p className="text-amber-900">{formatPrice(selectedOrder.platformFee)}</p>
-                </div>
+                {viewRole === "seller" && (
+                  <div>
+                    <h3 className="text-sm font-medium text-amber-500 mb-1">Platform Fee</h3>
+                    <p className="text-amber-900">{formatPrice(selectedOrder.platformFee)}</p>
+                  </div>
+                )}
               </div>
 
               {selectedOrder.cancelReason && (
