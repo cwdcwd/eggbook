@@ -77,6 +77,8 @@ async function getDashboardStats() {
 }
 
 export default async function DashboardPage() {
+  const { has } = await auth();
+  const hasSellerSubscription = has({ feature: "listing" });
   const stats = await getDashboardStats();
 
   return (
@@ -87,12 +89,14 @@ export default async function DashboardPage() {
           <h1 className="text-2xl font-bold text-amber-900">Dashboard</h1>
           <p className="text-amber-600">Welcome back! Here&apos;s your overview.</p>
         </div>
-        <Link href="/dashboard/listings/new">
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            New Listing
-          </Button>
-        </Link>
+        {hasSellerSubscription && (
+          <Link href="/dashboard/listings/new">
+            <Button>
+              <Plus className="w-4 h-4 mr-2" />
+              New Listing
+            </Button>
+          </Link>
+        )}
       </div>
 
       {/* Stats Grid */}
