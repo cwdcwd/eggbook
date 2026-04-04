@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -11,6 +12,8 @@ import {
   Settings,
   MessageSquare,
   Heart,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +32,21 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  
+  // Initialize from localStorage (default to false if not set)
+  const getInitialCollapsed = () => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar-collapsed") === "true";
+  };
+  
+  const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
+
+  // Save collapsed state to localStorage
+  const toggleCollapsed = () => {
+    const newState = !isCollapsed;
+    setIsCollapsed(newState);
+    localStorage.setItem("sidebar-collapsed", String(newState));
+  };
 
   return (
     <div className="min-h-screen bg-amber-50">
@@ -52,10 +70,28 @@ export default function DashboardLayout({
 
       <div className="flex">
         {/* Sidebar */}
-        <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:pt-16">
-          <div className="flex-1 flex flex-col min-h-0 bg-white border-r border-amber-200">
+        <aside 
+          className={cn(
+            "hidden md:flex md:flex-col md:fixed md:inset-y-0 md:pt-16 transition-all duration-300",
+            isCollapsed ? "md:w-16" : "md:w-64"
+          )}
+        >
+          <div className="flex-1 flex flex-col min-h-0 bg-white border-r border-amber-200 relative">
+            {/* Collapse toggle button */}
+            <button
+              onClick={toggleCollapsed}
+              className="absolute -right-3 top-8 w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-amber-600 transition-colors z-10"
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="w-4 h-4" />
+              ) : (
+                <ChevronLeft className="w-4 h-4" />
+              )}
+            </button>
+
             <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-              <nav className="mt-5 flex-1 px-2 space-y-1">
+              <nav className={cn("mt-5 flex-1 space-y-1", isCollapsed ? "px-1" : "px-2")}>
                 {navigation.map((item) => {
                   const isActive =
                     pathname === item.href ||
@@ -66,8 +102,10 @@ export default function DashboardLayout({
                     <Link
                       key={item.name}
                       href={item.href}
+                      title={isCollapsed ? item.name : undefined}
                       className={cn(
-                        "group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors",
+                        "group flex items-center text-sm font-medium rounded-lg transition-colors",
+                        isCollapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                         isActive
                           ? "bg-amber-100 text-amber-900"
                           : "text-amber-700 hover:bg-amber-50 hover:text-amber-900"
@@ -75,13 +113,14 @@ export default function DashboardLayout({
                     >
                       <item.icon
                         className={cn(
-                          "mr-3 h-5 w-5 flex-shrink-0",
+                          "h-5 w-5 flex-shrink-0",
+                          !isCollapsed && "mr-3",
                           isActive
                             ? "text-amber-600"
                             : "text-amber-400 group-hover:text-amber-600"
                         )}
                       />
-                      {item.name}
+                      {!isCollapsed && item.name}
                     </Link>
                   );
                 })}
@@ -116,7 +155,12 @@ export default function DashboardLayout({
         </nav>
 
         {/* Main content */}
-        <main className="md:pl-64 flex flex-col flex-1 pb-20 md:pb-0">
+        <main 
+          className={cn(
+            "flex flex-col flex-1 pb-20 md:pb-0 transition-all duration-300",
+            isCollapsed ? "md:pl-16" : "md:pl-64"
+          )}
+        >
           <div className="flex-1 py-6 px-4 sm:px-6 lg:px-8">{children}</div>
         </main>
       </div>
