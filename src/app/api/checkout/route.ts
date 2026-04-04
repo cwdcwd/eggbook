@@ -51,8 +51,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check seller has Stripe connected
-    if (!order.seller.stripeAccountId || !order.seller.stripeOnboarded) {
+    // Check seller has Stripe connected (skip in dev if STRIPE_CONNECT_ENABLED=false)
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED !== 'false'
+    if (connectEnabled && (!order.seller.stripeAccountId || !order.seller.stripeOnboarded)) {
       return NextResponse.json(
         { error: "Seller has not completed payment setup" },
         { status: 400 }
@@ -64,10 +65,15 @@ export async function POST(req: NextRequest) {
     const amountInCents = Math.round(order.totalPrice * 100);
     const platformFeeInCents = Math.round(order.platformFee * 100);
 
+    // Use seller's Stripe account if Connect is enabled and they're onboarded
+    const sellerAccount = connectEnabled && order.seller.stripeOnboarded 
+      ? order.seller.stripeAccountId 
+      : null;
+
     const session = await createCheckoutSession(
       order.id,
       amountInCents,
-      order.seller.stripeAccountId,
+      sellerAccount,
       platformFeeInCents,
       `${baseUrl}/checkout/${order.id}/success`,
       `${baseUrl}/checkout/${order.id}`

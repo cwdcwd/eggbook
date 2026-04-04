@@ -8,6 +8,7 @@ import { auth } from "@clerk/nextjs/server";
 
 // Fetch active sellers with their listings
 async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string; delivery?: string }) {
+  console.log('[getSellers] searchParams:', searchParams);
   const sellers = await db.sellerProfile.findMany({
     where: {
       isActive: true,
@@ -26,6 +27,7 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
           { displayName: { contains: searchParams.q, mode: "insensitive" } },
           { city: { contains: searchParams.q, mode: "insensitive" } },
           { state: { contains: searchParams.q, mode: "insensitive" } },
+          { zip: { startsWith: searchParams.q } },
         ],
       }),
       ...(searchParams.delivery === "true" && {
@@ -46,6 +48,7 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
     take: 50,
   });
 
+  console.log('[getSellers] found:', sellers.length, 'sellers');
   return sellers;
 }
 

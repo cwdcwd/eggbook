@@ -1,14 +1,24 @@
 import Pusher from 'pusher'
 import PusherClient from 'pusher-js'
 
-// Server-side Pusher instance
-export const pusherServer = new Pusher({
-  appId: process.env.PUSHER_APP_ID!,
-  key: process.env.PUSHER_KEY!,
-  secret: process.env.PUSHER_SECRET!,
-  cluster: process.env.PUSHER_CLUSTER!,
-  useTLS: true,
-})
+// Check if Pusher is configured
+const isPusherConfigured = !!(
+  process.env.PUSHER_APP_ID &&
+  process.env.PUSHER_KEY &&
+  process.env.PUSHER_SECRET &&
+  process.env.PUSHER_CLUSTER
+)
+
+// Server-side Pusher instance (only if configured)
+export const pusherServer = isPusherConfigured
+  ? new Pusher({
+      appId: process.env.PUSHER_APP_ID!,
+      key: process.env.PUSHER_KEY!,
+      secret: process.env.PUSHER_SECRET!,
+      cluster: process.env.PUSHER_CLUSTER!,
+      useTLS: true,
+    })
+  : null
 
 // Client-side Pusher instance (singleton)
 let pusherClientInstance: PusherClient | null = null
@@ -52,6 +62,7 @@ export async function triggerNewMessage(
     createdAt: Date
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(
     CHANNELS.conversation(conversationId),
     EVENTS.NEW_MESSAGE,
@@ -69,6 +80,7 @@ export async function triggerNewOrder(
     totalPrice: number
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(CHANNELS.seller(sellerId), EVENTS.NEW_ORDER, order)
 }
 
@@ -80,5 +92,6 @@ export async function triggerOrderUpdate(
     message?: string
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(CHANNELS.user(userId), EVENTS.ORDER_UPDATE, update)
 }

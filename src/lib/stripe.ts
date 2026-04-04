@@ -71,11 +71,14 @@ export async function createPaymentIntent(
 export async function createCheckoutSession(
   orderId: string,
   amount: number, // in cents
-  sellerStripeAccountId: string,
+  sellerStripeAccountId: string | null,
   platformFee: number, // in cents
   successUrl: string,
   cancelUrl: string
 ) {
+  // If no seller account or Connect transfers fail, do direct payment
+  const useConnect = !!sellerStripeAccountId && process.env.STRIPE_CONNECT_ENABLED !== 'false'
+  
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     line_items: [
@@ -90,13 +93,17 @@ export async function createCheckoutSession(
         quantity: 1,
       },
     ],
-    payment_intent_data: {
-      application_fee_amount: platformFee,
-      transfer_data: {
-        destination: sellerStripeAccountId,
-      },
-      metadata: { orderId },
-    },
+    payment_intent_data: useConnect
+      ? {
+          application_fee_amount: platformFee,
+          transfer_data: {
+            destination: sellerStripeAccountId!,
+          },
+          metadata: { orderId },
+        }
+      : {
+          metadata: { orderId },
+        },
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: { orderId },
