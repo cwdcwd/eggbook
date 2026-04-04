@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Badge, Card, Button } from "@/components/ui";
-import { formatPrice, formatDate } from "@/lib/utils";
-import { Check, X, MessageSquare, Eye, Loader2 } from "lucide-react";
+import { formatPrice, formatDate, formatRelativeTime } from "@/lib/utils";
+import { Check, X, MessageSquare, Eye, Loader2, History, ChevronDown } from "lucide-react";
 
 const STATUS_BADGES: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
   PENDING: { variant: "warning", label: "Pending" },
@@ -14,6 +13,16 @@ const STATUS_BADGES: Record<string, { variant: "default" | "success" | "warning"
   COMPLETED: { variant: "success", label: "Completed" },
   CANCELLED: { variant: "error", label: "Cancelled" },
   DECLINED: { variant: "error", label: "Declined" },
+};
+
+// Valid status transitions for sellers
+const SELLER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ["CONFIRMED", "DECLINED"],
+  CONFIRMED: ["PAID", "COMPLETED", "CANCELLED"], // PAID for manual payment, COMPLETED for paid externally
+  PAID: ["COMPLETED", "CANCELLED"],
+  COMPLETED: [],
+  CANCELLED: [],
+  DECLINED: [],
 };
 
 type Order = {
@@ -33,15 +42,27 @@ type Order = {
   buyer: { username: string; email: string };
 };
 
+type StatusHistoryEntry = {
+  id: string;
+  fromStatus: string | null;
+  toStatus: string;
+  changedBy: string | null;
+  changedByType: string;
+  reason: string | null;
+  createdAt: string;
+};
+
 export default function OrdersPage() {
-  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<string>("All");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [orderHistory, setOrderHistory] = useState<StatusHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState<string | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const statusParam = filter !== "All" ? `&status=${filter.toUpperCase()}` : "";
       const res = await fetch(`/api/orders?role=seller${statusParam}`);
@@ -54,14 +75,38 @@ export default function OrdersPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [filter]);
+
+  const fetchOrderHistory = useCallback(async (orderId: string) => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrderHistory(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch order history:", error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchOrders();
-  }, [filter]);
+  }, [filter, fetchOrders]);
+
+  useEffect(() => {
+    if (selectedOrder) {
+      fetchOrderHistory(selectedOrder.id);
+    } else {
+      setOrderHistory([]);
+    }
+  }, [selectedOrder, fetchOrderHistory]);
 
   const handleAction = async (orderId: string, action: string) => {
     setActionLoading(orderId);
+    setStatusDropdownOpen(null);
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PUT",
@@ -76,11 +121,32 @@ export default function OrdersPage() {
 
       // Refresh orders list
       fetchOrders();
+      
+      // Refresh history if modal is open
+      if (selectedOrder?.id === orderId) {
+        fetchOrderHistory(orderId);
+      }
     } catch (error) {
       console.error("Action failed:", error);
       alert(error instanceof Error ? error.message : "Action failed");
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const getActionForTransition = (from: string, to: string): string | null => {
+    if (from === "PENDING" && to === "CONFIRMED") return "confirm";
+    if (from === "PENDING" && to === "DECLINED") return "decline";
+    if (to === "CANCELLED") return "cancel";
+    if (from === "CONFIRMED" && to === "PAID") return "markPaid";
+    if (to === "COMPLETED") return "complete";
+    return null;
+  };
+
+  const handleStatusChange = (orderId: string, currentStatus: string, newStatus: string) => {
+    const action = getActionForTransition(currentStatus, newStatus);
+    if (action) {
+      handleAction(orderId, action);
     }
   };
 
@@ -127,7 +193,11 @@ export default function OrdersPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {orders.map((order) => (
+          {orders.map((order) => {
+            const availableTransitions = SELLER_TRANSITIONS[order.status] || [];
+            const hasTransitions = availableTransitions.length > 0;
+
+            return (
             <Card key={order.id} className="p-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex-1">
@@ -135,9 +205,41 @@ export default function OrdersPage() {
                     <h3 className="font-semibold text-amber-900">
                       Order #{order.id.slice(-6)}
                     </h3>
-                    <Badge variant={STATUS_BADGES[order.status]?.variant || "default"}>
-                      {STATUS_BADGES[order.status]?.label || order.status}
-                    </Badge>
+                    {/* Status dropdown for sellers */}
+                    <div className="relative">
+                      <button
+                        onClick={() => hasTransitions && setStatusDropdownOpen(statusDropdownOpen === order.id ? null : order.id)}
+                        className={`inline-flex items-center gap-1 ${hasTransitions ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                        disabled={actionLoading === order.id}
+                      >
+                        <Badge variant={STATUS_BADGES[order.status]?.variant || "default"}>
+                          {STATUS_BADGES[order.status]?.label || order.status}
+                          {hasTransitions && <ChevronDown className="w-3 h-3 ml-1 inline" />}
+                        </Badge>
+                      </button>
+                      
+                      {statusDropdownOpen === order.id && hasTransitions && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-10" 
+                            onClick={() => setStatusDropdownOpen(null)} 
+                          />
+                          <div className="absolute left-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-amber-200 py-1 z-20 min-w-[140px]">
+                            {availableTransitions.map((status) => (
+                              <button
+                                key={status}
+                                onClick={() => handleStatusChange(order.id, order.status, status)}
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-amber-50 flex items-center gap-2"
+                              >
+                                <Badge variant={STATUS_BADGES[status]?.variant || "default"} className="text-xs">
+                                  {STATUS_BADGES[status]?.label || status}
+                                </Badge>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <p className="text-sm text-amber-600 mb-2">
                     {order.listing?.title} × {order.quantity} • from @{order.buyer?.username}
@@ -232,9 +334,17 @@ export default function OrdersPage() {
                     View Details
                   </Button>
                 )}
+
+                {/* View history button for all statuses */}
+                {!["COMPLETED", "CANCELLED", "DECLINED"].includes(order.status) && (
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedOrder(order)}>
+                    <History className="w-4 h-4 mr-1" />
+                    History
+                  </Button>
+                )}
               </div>
             </Card>
-          ))}
+          )})}
         </div>
       )}
 
@@ -291,31 +401,74 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <h3 className="text-sm font-medium text-amber-500 mb-1">Ordered</h3>
-                  <p className="text-amber-600">{formatDate(selectedOrder.createdAt)}</p>
-                </div>
-                {selectedOrder.paidAt && (
-                  <div>
-                    <h3 className="text-sm font-medium text-amber-500 mb-1">Paid</h3>
-                    <p className="text-amber-600">{formatDate(selectedOrder.paidAt)}</p>
-                  </div>
-                )}
-                {selectedOrder.completedAt && (
-                  <div>
-                    <h3 className="text-sm font-medium text-amber-500 mb-1">Completed</h3>
-                    <p className="text-amber-600">{formatDate(selectedOrder.completedAt)}</p>
-                  </div>
-                )}
-              </div>
-
               {selectedOrder.cancelReason && (
                 <div>
                   <h3 className="text-sm font-medium text-amber-500 mb-1">Reason</h3>
                   <p className="text-amber-600">{selectedOrder.cancelReason}</p>
                 </div>
               )}
+
+              {/* Order History Timeline */}
+              <div className="border-t border-amber-100 pt-4 mt-4">
+                <h3 className="text-sm font-medium text-amber-500 mb-3 flex items-center gap-2">
+                  <History className="w-4 h-4" />
+                  Order History
+                </h3>
+                
+                {historyLoading ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+                  </div>
+                ) : orderHistory.length === 0 ? (
+                  <p className="text-sm text-amber-400 text-center py-2">No history available</p>
+                ) : (
+                  <div className="relative">
+                    {/* Timeline line */}
+                    <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-amber-200" />
+                    
+                    <div className="space-y-3">
+                      {orderHistory.map((entry, index) => (
+                        <div key={entry.id} className="relative flex gap-3 pl-6">
+                          {/* Timeline dot */}
+                          <div className={`absolute left-0 w-4 h-4 rounded-full border-2 ${
+                            index === 0 
+                              ? 'bg-amber-500 border-amber-500' 
+                              : 'bg-white border-amber-300'
+                          }`} />
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {entry.fromStatus && (
+                                <>
+                                  <Badge variant={STATUS_BADGES[entry.fromStatus]?.variant || "default"} className="text-xs">
+                                    {STATUS_BADGES[entry.fromStatus]?.label || entry.fromStatus}
+                                  </Badge>
+                                  <span className="text-amber-400">→</span>
+                                </>
+                              )}
+                              <Badge variant={STATUS_BADGES[entry.toStatus]?.variant || "default"} className="text-xs">
+                                {STATUS_BADGES[entry.toStatus]?.label || entry.toStatus}
+                              </Badge>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 mt-1 text-xs text-amber-500">
+                              <span>{formatRelativeTime(entry.createdAt)}</span>
+                              <span>•</span>
+                              <span className="capitalize">
+                                {entry.changedByType === "SYSTEM" ? "System" : entry.changedByType.toLowerCase()}
+                              </span>
+                            </div>
+                            
+                            {entry.reason && (
+                              <p className="text-xs text-amber-600 mt-1 italic">{entry.reason}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="mt-6 flex justify-end">

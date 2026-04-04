@@ -103,7 +103,8 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       confirm: { fromStatus: ["PENDING"], toStatus: "CONFIRMED", allowedBy: "seller" },
       decline: { fromStatus: ["PENDING"], toStatus: "DECLINED", allowedBy: "seller" },
       cancel: { fromStatus: ["PENDING", "CONFIRMED"], toStatus: "CANCELLED", allowedBy: "both" },
-      complete: { fromStatus: ["PAID"], toStatus: "COMPLETED", allowedBy: "seller" },
+      markPaid: { fromStatus: ["CONFIRMED"], toStatus: "PAID", allowedBy: "seller" }, // Manual payment (cash, Venmo, etc.)
+      complete: { fromStatus: ["PAID", "CONFIRMED"], toStatus: "COMPLETED", allowedBy: "seller" }, // Can complete directly from CONFIRMED if paid externally
     };
 
     const transition = transitions[action];
@@ -140,7 +141,8 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
           status: transition.toStatus,
           ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
           ...(action === "decline" && { cancelReason }),
-          ...(action === "complete" && { completedAt: new Date() }),
+          ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
+          ...(action === "complete" && { completedAt: new Date(), ...(!order.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
         },
         include: {
           listing: true,
@@ -160,13 +162,20 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       }
 
       // Log status change to audit trail
+      const auditReason = (() => {
+        if (cancelReason) return cancelReason;
+        if (action === "markPaid") return "Marked as paid (external payment)";
+        if (action === "complete" && order.status === "CONFIRMED") return "Completed with external payment";
+        return null;
+      })();
+
       await logOrderStatusChange({
         orderId: id,
         fromStatus: order.status,
         toStatus: transition.toStatus,
         changedBy: userId,
         changedByType: actorType,
-        reason: cancelReason || null,
+        reason: auditReason,
         tx,
       });
 
