@@ -134,7 +134,7 @@ export async function handleSubscriptionUpdate(
  */
 export async function canCreateListing(clerkUserId: string): Promise<
   | { allowed: true }
-  | { allowed: false; reason: string; code: 'SUBSCRIPTION_REQUIRED' | 'LISTING_LIMIT_REACHED' }
+  | { allowed: false; reason: string; code: 'USER_NOT_FOUND' | 'LISTING_LIMIT_REACHED' }
 > {
   const user = await db.user.findUnique({
     where: { clerkId: clerkUserId },
@@ -153,7 +153,7 @@ export async function canCreateListing(clerkUserId: string): Promise<
     return {
       allowed: false,
       reason: 'User not found',
-      code: 'SUBSCRIPTION_REQUIRED',
+      code: 'USER_NOT_FOUND',
     }
   }
 

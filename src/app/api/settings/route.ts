@@ -127,8 +127,34 @@ export async function PUT(req: NextRequest) {
     const previousAvatarUrl = user.sellerProfile?.avatarUrl;
     if (avatarUrl && avatarUrl !== previousAvatarUrl && isAllowedAvatarUrl(avatarUrl)) {
       try {
-        const response = await fetch(avatarUrl);
+        // Fetch with redirect:manual to prevent SSRF via redirect to internal hosts
+        const response = await fetch(avatarUrl, { redirect: "manual" });
+        
+        // Reject redirects and non-OK responses
+        if (!response.ok || response.status >= 300) {
+          throw new Error(`Invalid response: ${response.status}`);
+        }
+        
+        // Validate content type is an image
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.startsWith("image/")) {
+          throw new Error(`Invalid content type: ${contentType}`);
+        }
+        
+        // Enforce size limit (5MB max)
+        const contentLength = parseInt(response.headers.get("content-length") || "0", 10);
+        const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
+        if (contentLength > MAX_AVATAR_SIZE) {
+          throw new Error(`Avatar too large: ${contentLength} bytes`);
+        }
+        
         const blob = await response.blob();
+        
+        // Double-check blob size (content-length can be missing/wrong)
+        if (blob.size > MAX_AVATAR_SIZE) {
+          throw new Error(`Avatar too large: ${blob.size} bytes`);
+        }
+        
         const file = new File([blob], "avatar.jpg", { type: blob.type });
         await clerkClient.users.updateUserProfileImage(userId, { file });
       } catch (err) {

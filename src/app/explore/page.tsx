@@ -8,7 +8,9 @@ import { auth } from "@clerk/nextjs/server";
 
 // Fetch active sellers with their listings
 async function getSellers(searchParams: { q?: string; lat?: string; lng?: string; tag?: string; delivery?: string }) {
-  console.log('[getSellers] searchParams:', searchParams);
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[getSellers] searchParams:', searchParams);
+  }
   const sellers = await db.sellerProfile.findMany({
     where: {
       isActive: true,
@@ -48,7 +50,9 @@ async function getSellers(searchParams: { q?: string; lat?: string; lng?: string
     take: 50,
   });
 
-  console.log('[getSellers] found:', sellers.length, 'sellers');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[getSellers] found:', sellers.length, 'sellers');
+  }
   return sellers;
 }
 

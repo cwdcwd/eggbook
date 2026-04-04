@@ -76,7 +76,7 @@ export async function createCheckoutSession(
   successUrl: string,
   cancelUrl: string
 ) {
-  // If no seller account or Connect transfers fail, do direct payment
+  // Use Connect transfers if seller has Stripe account and Connect is enabled
   const useConnect = !!sellerStripeAccountId && process.env.STRIPE_CONNECT_ENABLED !== 'false'
   
   const session = await stripe.checkout.sessions.create({

@@ -41,7 +41,7 @@ async function getDashboardStats() {
     db.eggListing.count({ where: { sellerId, isAvailable: true } }),
   ]);
 
-  // Get order counts for this month
+  // Get order counts (pending = all current pending, completed = this month only)
   const startOfMonth = new Date(year, month - 1, 1);
   const [pendingOrders, completedOrders] = await Promise.all([
     db.order.count({
