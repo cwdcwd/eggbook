@@ -42,9 +42,18 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 // Update a listing
 export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Clerk's has() is the authoritative subscription check
+    const hasListingFeature = has({ feature: "listing" });
+    if (!hasListingFeature) {
+      return NextResponse.json(
+        { error: "Seller subscription required to edit listings", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;

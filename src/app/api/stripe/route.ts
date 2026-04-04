@@ -7,9 +7,18 @@ import { createConnectAccount, createAccountLink, getAccountStatus } from "@/lib
 // Start Stripe Connect onboarding
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Clerk's has() is the authoritative subscription check for Stripe onboarding
+    const hasListingFeature = has({ feature: "listing" });
+    if (!hasListingFeature) {
+      return NextResponse.json(
+        { error: "Seller subscription required to set up payments", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
     }
 
     const user = await getOrCreateUser(userId);

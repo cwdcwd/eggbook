@@ -60,9 +60,18 @@ export async function GET() {
 // Update seller profile settings
 export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Clerk's has() is the authoritative subscription check for seller settings
+    const hasListingFeature = has({ feature: "listing" });
+    if (!hasListingFeature) {
+      return NextResponse.json(
+        { error: "Seller subscription required to update seller settings", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
     }
 
     const user = await getOrCreateUser(userId);
