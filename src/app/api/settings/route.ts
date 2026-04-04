@@ -46,6 +46,8 @@ export async function GET() {
         username: user.username,
         email: user.email,
         role: user.role,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionPlan: user.subscriptionPlan,
       },
       sellerProfile,
     });
