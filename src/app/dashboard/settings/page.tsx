@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
 import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X, ShoppingCart, Lock } from "lucide-react";
@@ -14,6 +15,9 @@ const PICKUP_TYPES = [
 
 function SettingsContent() {
   const searchParams = useSearchParams();
+  const { has } = useAuth();
+  const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -25,7 +29,6 @@ function SettingsContent() {
     payoutsEnabled?: boolean;
     detailsSubmitted?: boolean;
   }>({ connected: false, onboarded: false });
-  const [hasSellerSubscription, setHasSellerSubscription] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   const [profile, setProfile] = useState({
@@ -78,10 +81,6 @@ function SettingsContent() {
         const res = await fetch("/api/settings");
         if (res.ok) {
           const data = await res.json();
-          
-          // Check if user has active seller subscription
-          const isActiveSubscription = data.user?.subscriptionStatus === "ACTIVE";
-          setHasSellerSubscription(isActiveSubscription);
           
           if (data.sellerProfile) {
             setProfile({
