@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
@@ -30,7 +30,7 @@ interface Conversation {
   _count?: { messages: number };
 }
 
-export default function MessagesPage() {
+function MessagesPageContent() {
   const { user } = useUser();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -399,5 +399,17 @@ export default function MessagesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-[calc(100vh-12rem)]">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+      </div>
+    }>
+      <MessagesPageContent />
+    </Suspense>
   );
 }
