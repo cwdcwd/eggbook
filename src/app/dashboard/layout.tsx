@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -32,6 +32,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = useState(0);
   
   // Initialize from localStorage (default to false if not set)
   const getInitialCollapsed = () => {
@@ -40,6 +41,31 @@ export default function DashboardLayout({
   };
   
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
+
+  // Fetch unread message count
+  useEffect(() => {
+    async function fetchUnreadCount() {
+      try {
+        const res = await fetch("/api/messages");
+        if (res.ok) {
+          const conversations = await res.json();
+          if (Array.isArray(conversations)) {
+            const total = conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
+              return sum + (conv._count?.messages || 0);
+            }, 0);
+            setUnreadCount(total);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch unread count:", error);
+      }
+    }
+    
+    fetchUnreadCount();
+    // Poll every 30 seconds for new messages
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Save collapsed state to localStorage
   const toggleCollapsed = () => {
@@ -97,6 +123,7 @@ export default function DashboardLayout({
                     pathname === item.href ||
                     (item.href !== "/dashboard" &&
                       pathname.startsWith(item.href));
+                  const showBadge = item.name === "Messages" && unreadCount > 0;
 
                   return (
                     <Link
@@ -104,7 +131,7 @@ export default function DashboardLayout({
                       href={item.href}
                       title={isCollapsed ? item.name : undefined}
                       className={cn(
-                        "group flex items-center text-sm font-medium rounded-lg transition-colors",
+                        "group flex items-center text-sm font-medium rounded-lg transition-colors relative",
                         isCollapsed ? "justify-center px-2 py-2" : "px-3 py-2",
                         isActive
                           ? "bg-amber-100 text-amber-900"
@@ -121,6 +148,16 @@ export default function DashboardLayout({
                         )}
                       />
                       {!isCollapsed && item.name}
+                      {showBadge && (
+                        <span className={cn(
+                          "bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center",
+                          isCollapsed 
+                            ? "absolute -top-1 -right-1 w-4 h-4 text-[10px]" 
+                            : "ml-auto min-w-[20px] h-5 px-1.5"
+                        )}>
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -136,17 +173,25 @@ export default function DashboardLayout({
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              const showBadge = item.name === "Messages" && unreadCount > 0;
 
               return (
                 <Link
                   key={item.name}
                   href={item.href}
                   className={cn(
-                    "flex flex-col items-center px-3 py-1",
+                    "flex flex-col items-center px-3 py-1 relative",
                     isActive ? "text-amber-600" : "text-amber-400"
                   )}
                 >
-                  <item.icon className="h-6 w-6" />
+                  <div className="relative">
+                    <item.icon className="h-6 w-6" />
+                    {showBadge && (
+                      <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs mt-1">{item.name}</span>
                 </Link>
               );
