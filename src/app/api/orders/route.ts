@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { OrderStatus } from "@prisma/client";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
 import { getOrCreateUser } from "@/lib/auth";
@@ -153,6 +154,24 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const role = searchParams.get("role") || "buyer"; // buyer or seller
     const status = searchParams.get("status");
+    const uncompleted = searchParams.get("uncompleted") === "true";
+
+    // Build status filter - orders that still need action (not completed, cancelled, or declined)
+    const uncompletedStatuses: OrderStatus[] = [
+      OrderStatus.PENDING,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PAID,
+    ];
+
+    const getStatusFilter = () => {
+      if (uncompleted) {
+        return { status: { in: uncompletedStatuses } };
+      }
+      if (status) {
+        return { status: status as OrderStatus };
+      }
+      return {};
+    };
 
     let orders;
 
@@ -160,7 +179,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           sellerId: user.sellerProfile.id,
-          ...(status && { status: status as any }),
+          ...getStatusFilter(),
         },
         include: {
           listing: true,
@@ -172,7 +191,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           buyerId: user.id,
-          ...(status && { status: status as any }),
+          ...getStatusFilter(),
         },
         include: {
           listing: true,

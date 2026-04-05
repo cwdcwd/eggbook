@@ -83,13 +83,13 @@ export default function DashboardLayout({
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch pending orders count for sellers
+  // Fetch uncompleted orders count for sellers
   useEffect(() => {
     let cancelled = false;
     
     async function fetchPendingOrders() {
       try {
-        const res = await fetch("/api/orders?role=seller&status=PENDING");
+        const res = await fetch("/api/orders?role=seller&uncompleted=true");
         if (res.ok && !cancelled) {
           const orders = await res.json();
           setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0);
@@ -152,12 +152,12 @@ export default function DashboardLayout({
     // Subscribe to seller channel for new orders
     const sellerChannel = pusher.subscribe(CHANNELS.seller(clerkUserId));
     sellerChannel.bind(EVENTS.NEW_ORDER, () => {
-      // Increment pending orders when a new order arrives
+      // Increment uncompleted orders when a new order arrives
       if (!pathname.includes("/orders")) {
         setPendingOrdersCount(prev => prev + 1);
       } else {
         // Refetch if we're on the orders page
-        fetch("/api/orders?role=seller&status=PENDING")
+        fetch("/api/orders?role=seller&uncompleted=true")
           .then(res => res.ok ? res.json() : [])
           .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
           .catch(() => {});
@@ -167,8 +167,8 @@ export default function DashboardLayout({
     // Subscribe to user channel for order status updates
     const userChannel = pusher.subscribe(CHANNELS.user(clerkUserId));
     userChannel.bind(EVENTS.ORDER_UPDATE, () => {
-      // Refetch pending orders when status changes
-      fetch("/api/orders?role=seller&status=PENDING")
+      // Refetch uncompleted orders when status changes
+      fetch("/api/orders?role=seller&uncompleted=true")
         .then(res => res.ok ? res.json() : [])
         .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
         .catch(() => {});
