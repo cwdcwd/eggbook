@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     // Get the listing
     const listing = await db.eggListing.findUnique({
       where: { id: listingId },
-      include: { seller: true },
+      include: { seller: { include: { user: true } } },
     });
 
     if (!listing) {
@@ -112,8 +112,8 @@ export async function POST(req: NextRequest) {
       return newOrder;
     });
 
-    // Notify seller via Pusher
-    await triggerNewOrder(listing.seller.userId, {
+    // Notify seller via Pusher (use clerkId for channel subscription)
+    await triggerNewOrder(listing.seller.user.clerkId, {
       id: order.id,
       buyerName: buyer.username,
       listingTitle: listing.title,
