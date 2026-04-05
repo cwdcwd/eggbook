@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { triggerNewMessage } from "@/lib/pusher";
+import { triggerNewMessage, triggerUserNewMessage } from "@/lib/pusher";
 import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
@@ -106,6 +106,16 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Notify the recipient about the new message (for unread badge)
+    const recipientUserId = conversation.buyerId === user.id 
+      ? conversation.sellerId 
+      : conversation.buyerId;
+    await triggerUserNewMessage(recipientUserId, {
+      conversationId: conversation.id,
+      senderId: user.id,
+      senderUsername: user.username,
+    });
+
     return NextResponse.json(message);
   } catch (error) {
     console.error("Error sending message:", error);
@@ -191,7 +201,8 @@ export async function GET(req: NextRequest) {
         orderBy: { updatedAt: "desc" },
       });
 
-      return NextResponse.json(conversations);
+      // Include userId for Pusher subscription
+      return NextResponse.json({ conversations, userId: user.id });
     }
   } catch (error) {
     console.error("Error fetching messages:", error);

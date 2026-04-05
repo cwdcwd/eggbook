@@ -88,7 +88,8 @@ export default function MessagesPage() {
         // Refresh conversations and select the new one
         const convoRes = await fetch("/api/messages");
         if (convoRes.ok) {
-          const convos = await convoRes.json();
+          const data = await convoRes.json();
+          const convos = data.conversations || data;
           setConversations(Array.isArray(convos) ? convos : []);
           
           // Find the conversation with the recipient
@@ -122,7 +123,8 @@ export default function MessagesPage() {
           return;
         }
         const data = await res.json();
-        setConversations(Array.isArray(data) ? data : []);
+        const convos = data.conversations || data;
+        setConversations(Array.isArray(convos) ? convos : []);
       } catch (error) {
         console.error("Error fetching conversations:", error);
         setConversations([]);

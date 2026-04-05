@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -33,6 +34,8 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [dbUserId, setDbUserId] = useState<string | null>(null);
+  const lastPathRef = useRef(pathname);
   
   // Initialize from localStorage (default to false if not set)
   const getInitialCollapsed = () => {
@@ -42,15 +45,27 @@ export default function DashboardLayout({
   
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
 
-  // Fetch unread message count
+  // Fetch unread message count and user ID
   useEffect(() => {
-    async function fetchUnreadCount() {
+    let cancelled = false;
+    
+    async function fetchData() {
       try {
         const res = await fetch("/api/messages");
-        if (res.ok) {
-          const conversations = await res.json();
-          if (Array.isArray(conversations)) {
-            const total = conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          // API returns { conversations: [...], userId: string }
+          if (data.userId) {
+            setDbUserId(data.userId);
+          }
+          if (Array.isArray(data.conversations)) {
+            const total = data.conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
+              return sum + (conv._count?.messages || 0);
+            }, 0);
+            setUnreadCount(total);
+          } else if (Array.isArray(data)) {
+            // Fallback for old response format
+            const total = data.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
               return sum + (conv._count?.messages || 0);
             }, 0);
             setUnreadCount(total);
@@ -61,11 +76,63 @@ export default function DashboardLayout({
       }
     }
     
-    fetchUnreadCount();
-    // Poll every 30 seconds for new messages
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
+    fetchData();
+    
+    return () => { cancelled = true; };
   }, []);
+
+  // Subscribe to Pusher for real-time unread updates
+  useEffect(() => {
+    if (!dbUserId) return;
+
+    const pusher = getPusherClient();
+    if (!pusher) return;
+
+    const channel = pusher.subscribe(CHANNELS.user(dbUserId));
+    
+    channel.bind(EVENTS.USER_NEW_MESSAGE, () => {
+      // Increment unread count when a new message arrives
+      // Only if we're not on the messages page
+      if (!pathname.includes("/messages")) {
+        setUnreadCount(prev => prev + 1);
+      }
+    });
+
+    return () => {
+      channel.unbind_all();
+      pusher.unsubscribe(CHANNELS.user(dbUserId));
+    };
+  }, [dbUserId, pathname]);
+
+  // Reset unread count when navigating to messages page
+  useEffect(() => {
+    // Only refetch when navigating TO messages page (not initial load)
+    if (pathname.includes("/messages") && !lastPathRef.current.includes("/messages")) {
+      let cancelled = false;
+      
+      async function refetch() {
+        try {
+          const res = await fetch("/api/messages");
+          if (res.ok && !cancelled) {
+            const data = await res.json();
+            if (Array.isArray(data.conversations)) {
+              const total = data.conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
+                return sum + (conv._count?.messages || 0);
+              }, 0);
+              setUnreadCount(total);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to refetch unread count:", error);
+        }
+      }
+      
+      refetch();
+      return () => { cancelled = true; };
+    }
+    
+    lastPathRef.current = pathname;
+  }, [pathname]);
 
   // Save collapsed state to localStorage
   const toggleCollapsed = () => {

@@ -56,6 +56,7 @@ export const EVENTS = {
   NEW_ORDER: 'new-order',
   ORDER_UPDATE: 'order-update',
   TYPING: 'typing',
+  USER_NEW_MESSAGE: 'user-new-message',
 }
 
 // Trigger events
@@ -104,4 +105,21 @@ export async function triggerOrderUpdate(
 ) {
   if (!pusherServer) return
   await pusherServer.trigger(CHANNELS.user(userId), EVENTS.ORDER_UPDATE, update)
+}
+
+// Notify a user about a new message (for unread badge)
+export async function triggerUserNewMessage(
+  recipientId: string,
+  message: {
+    conversationId: string
+    senderId: string
+    senderUsername: string
+  }
+) {
+  if (!pusherServer) return
+  await pusherServer.trigger(
+    CHANNELS.user(recipientId),
+    EVENTS.USER_NEW_MESSAGE,
+    message
+  )
 }
