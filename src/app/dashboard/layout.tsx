@@ -98,6 +98,21 @@ export default function DashboardLayout({
       }
     });
 
+    channel.bind(EVENTS.MESSAGES_READ, () => {
+      // Refetch unread count when recipient reads our messages
+      fetch("/api/messages")
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data?.conversations) {
+            const total = data.conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
+              return sum + (conv._count?.messages || 0);
+            }, 0);
+            setUnreadCount(total);
+          }
+        })
+        .catch(() => {});
+    });
+
     return () => {
       channel.unbind_all();
       pusher.unsubscribe(CHANNELS.user(dbUserId));

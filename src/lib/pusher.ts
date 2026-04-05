@@ -57,6 +57,7 @@ export const EVENTS = {
   ORDER_UPDATE: 'order-update',
   TYPING: 'typing',
   USER_NEW_MESSAGE: 'user-new-message',
+  MESSAGES_READ: 'messages-read',
 }
 
 // Trigger events
@@ -121,5 +122,18 @@ export async function triggerUserNewMessage(
     CHANNELS.user(recipientId),
     EVENTS.USER_NEW_MESSAGE,
     message
+  )
+}
+
+// Notify the sender that their messages have been read
+export async function triggerMessagesRead(
+  senderId: string,
+  conversationId: string
+) {
+  if (!pusherServer) return
+  await pusherServer.trigger(
+    CHANNELS.user(senderId),
+    EVENTS.MESSAGES_READ,
+    { conversationId }
   )
 }

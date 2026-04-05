@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { triggerNewMessage, triggerUserNewMessage } from "@/lib/pusher";
+import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
 import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
@@ -164,14 +164,31 @@ export async function GET(req: NextRequest) {
       }
 
       // Mark messages as read
-      await db.message.updateMany({
+      const unreadMessages = await db.message.findMany({
         where: {
           conversationId,
           senderId: { not: user.id },
           read: false,
         },
-        data: { read: true },
+        select: { senderId: true },
       });
+
+      if (unreadMessages.length > 0) {
+        await db.message.updateMany({
+          where: {
+            conversationId,
+            senderId: { not: user.id },
+            read: false,
+          },
+          data: { read: true },
+        });
+
+        // Notify senders that their messages were read
+        const senderIds = [...new Set(unreadMessages.map(m => m.senderId))];
+        for (const senderId of senderIds) {
+          await triggerMessagesRead(senderId, conversationId);
+        }
+      }
 
       return NextResponse.json(conversation);
     } else {
