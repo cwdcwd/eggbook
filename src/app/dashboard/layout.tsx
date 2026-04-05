@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import {
   Egg,
   LayoutDashboard,
@@ -33,7 +33,9 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const { userId: clerkUserId } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const lastPathRef = useRef(pathname);
   
@@ -81,6 +83,27 @@ export default function DashboardLayout({
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch pending orders count for sellers
+  useEffect(() => {
+    let cancelled = false;
+    
+    async function fetchPendingOrders() {
+      try {
+        const res = await fetch("/api/orders?role=seller&status=PENDING");
+        if (res.ok && !cancelled) {
+          const orders = await res.json();
+          setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch pending orders:", error);
+      }
+    }
+    
+    fetchPendingOrders();
+    
+    return () => { cancelled = true; };
+  }, []);
+
   // Subscribe to Pusher for real-time unread updates
   useEffect(() => {
     if (!dbUserId) return;
@@ -119,6 +142,46 @@ export default function DashboardLayout({
     };
   }, [dbUserId, pathname]);
 
+  // Subscribe to Pusher for order updates (new orders and status changes)
+  useEffect(() => {
+    if (!clerkUserId) return;
+
+    const pusher = getPusherClient();
+    if (!pusher) return;
+
+    // Subscribe to seller channel for new orders
+    const sellerChannel = pusher.subscribe(CHANNELS.seller(clerkUserId));
+    sellerChannel.bind(EVENTS.NEW_ORDER, () => {
+      // Increment pending orders when a new order arrives
+      if (!pathname.includes("/orders")) {
+        setPendingOrdersCount(prev => prev + 1);
+      } else {
+        // Refetch if we're on the orders page
+        fetch("/api/orders?role=seller&status=PENDING")
+          .then(res => res.ok ? res.json() : [])
+          .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
+          .catch(() => {});
+      }
+    });
+
+    // Subscribe to user channel for order status updates
+    const userChannel = pusher.subscribe(CHANNELS.user(clerkUserId));
+    userChannel.bind(EVENTS.ORDER_UPDATE, () => {
+      // Refetch pending orders when status changes
+      fetch("/api/orders?role=seller&status=PENDING")
+        .then(res => res.ok ? res.json() : [])
+        .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
+        .catch(() => {});
+    });
+
+    return () => {
+      sellerChannel.unbind_all();
+      userChannel.unbind(EVENTS.ORDER_UPDATE);
+      pusher.unsubscribe(CHANNELS.seller(clerkUserId));
+      // Don't unsubscribe from user channel here as it's also used for messages
+    };
+  }, [clerkUserId, pathname]);
+
   // Reset unread count when navigating to messages page
   useEffect(() => {
     // Only refetch when navigating TO messages page (not initial load)
@@ -147,6 +210,17 @@ export default function DashboardLayout({
     }
     
     lastPathRef.current = pathname;
+  }, [pathname]);
+
+  // Reset pending orders when navigating to orders page
+  useEffect(() => {
+    if (pathname.includes("/orders") && !lastPathRef.current.includes("/orders")) {
+      // Refetch pending orders when visiting orders page
+      fetch("/api/orders?role=seller&status=PENDING")
+        .then(res => res.ok ? res.json() : [])
+        .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
+        .catch(() => {});
+    }
   }, [pathname]);
 
   // Save collapsed state to localStorage
@@ -205,7 +279,9 @@ export default function DashboardLayout({
                     pathname === item.href ||
                     (item.href !== "/dashboard" &&
                       pathname.startsWith(item.href));
-                  const showBadge = item.name === "Messages" && unreadCount > 0;
+                  const showMessageBadge = item.name === "Messages" && unreadCount > 0;
+                  const showOrderBadge = item.name === "Orders" && pendingOrdersCount > 0;
+                  const badgeCount = item.name === "Messages" ? unreadCount : pendingOrdersCount;
 
                   return (
                     <Link
@@ -230,14 +306,14 @@ export default function DashboardLayout({
                         )}
                       />
                       {!isCollapsed && item.name}
-                      {showBadge && (
+                      {(showMessageBadge || showOrderBadge) && (
                         <span className={cn(
                           "bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center",
                           isCollapsed 
                             ? "absolute -top-1 -right-1 w-4 h-4 text-[10px]" 
                             : "ml-auto min-w-[20px] h-5 px-1.5"
                         )}>
-                          {unreadCount > 99 ? "99+" : unreadCount}
+                          {badgeCount > 99 ? "99+" : badgeCount}
                         </span>
                       )}
                     </Link>
@@ -255,7 +331,9 @@ export default function DashboardLayout({
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
-              const showBadge = item.name === "Messages" && unreadCount > 0;
+              const showMessageBadge = item.name === "Messages" && unreadCount > 0;
+              const showOrderBadge = item.name === "Orders" && pendingOrdersCount > 0;
+              const badgeCount = item.name === "Messages" ? unreadCount : pendingOrdersCount;
 
               return (
                 <Link
@@ -268,9 +346,9 @@ export default function DashboardLayout({
                 >
                   <div className="relative">
                     <item.icon className="h-6 w-6" />
-                    {showBadge && (
+                    {(showMessageBadge || showOrderBadge) && (
                       <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                        {unreadCount > 9 ? "9+" : unreadCount}
+                        {badgeCount > 9 ? "9+" : badgeCount}
                       </span>
                     )}
                   </div>

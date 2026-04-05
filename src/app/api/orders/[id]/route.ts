@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { triggerOrderUpdate } from "@/lib/pusher";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -181,6 +182,23 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
       return updated;
     });
+
+    // Notify both buyer and seller about the status change
+    const buyerUserId = updatedOrder.buyer.clerkId;
+    const sellerUserId = updatedOrder.seller.user.clerkId;
+
+    await Promise.all([
+      triggerOrderUpdate(buyerUserId, {
+        orderId: updatedOrder.id,
+        status: updatedOrder.status,
+        message: `Order ${action}ed`,
+      }),
+      triggerOrderUpdate(sellerUserId, {
+        orderId: updatedOrder.id,
+        status: updatedOrder.status,
+        message: `Order ${action}ed`,
+      }),
+    ]);
 
     return NextResponse.json(updatedOrder);
   } catch (error) {
