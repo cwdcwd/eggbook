@@ -112,7 +112,7 @@ export function SearchFilters({
 
         {/* Location button */}
         <Button
-          variant={userLocation ? "default" : "outline"}
+          variant={userLocation ? "primary" : "outline"}
           size="sm"
           onClick={userLocation ? onClearLocation : onLocationRequest}
           disabled={isLoadingLocation}
@@ -131,7 +131,7 @@ export function SearchFilters({
         {tags.slice(0, 5).map((tag) => (
           <Button
             key={tag.slug}
-            variant={selectedTags.includes(tag.slug) ? "default" : "outline"}
+            variant={selectedTags.includes(tag.slug) ? "primary" : "outline"}
             size="sm"
             onClick={() => toggleTag(tag.slug)}
           >
@@ -141,7 +141,7 @@ export function SearchFilters({
 
         {/* Delivery filter */}
         <Button
-          variant={delivery ? "default" : "outline"}
+          variant={delivery ? "primary" : "outline"}
           size="sm"
           onClick={() => onDeliveryChange(!delivery)}
         >
