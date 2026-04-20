@@ -194,7 +194,8 @@ function ExploreContent() {
   // Toggle favorite
   const handleFavorite = useCallback(async (sellerId: string) => {
     if (!userId) {
-      router.push("/sign-in");
+      const returnUrl = window.location.pathname + window.location.search;
+      router.push(`/sign-up?redirect_url=${encodeURIComponent(returnUrl)}`);
       return;
     }
 
