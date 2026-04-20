@@ -396,7 +396,7 @@ async function seedOrders(
       })
 
       // Add more history entries based on status
-      if ([OrderStatus.CONFIRMED, OrderStatus.PAID, OrderStatus.COMPLETED].includes(status)) {
+      if (([OrderStatus.CONFIRMED, OrderStatus.PAID, OrderStatus.COMPLETED] as OrderStatus[]).includes(status)) {
         await db.orderStatusHistory.create({
           data: {
             orderId: order.id,
@@ -409,7 +409,7 @@ async function seedOrders(
         })
       }
 
-      if ([OrderStatus.PAID, OrderStatus.COMPLETED].includes(status)) {
+      if (([OrderStatus.PAID, OrderStatus.COMPLETED] as OrderStatus[]).includes(status)) {
         await db.orderStatusHistory.create({
           data: {
             orderId: order.id,
