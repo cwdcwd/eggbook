@@ -365,16 +365,16 @@ async function seedOrders(
             : null,
           deliveryLat: fulfillmentType === FulfillmentType.DELIVERY ? profile.lat : null,
           deliveryLng: fulfillmentType === FulfillmentType.DELIVERY ? profile.lng : null,
-          stripePaymentId: [OrderStatus.PAID, OrderStatus.COMPLETED].includes(status)
+          stripePaymentId: ([OrderStatus.PAID, OrderStatus.COMPLETED] as OrderStatus[]).includes(status)
             ? `pi_test_${Date.now()}_${i}`
             : null,
-          paidAt: [OrderStatus.PAID, OrderStatus.COMPLETED].includes(status)
+          paidAt: ([OrderStatus.PAID, OrderStatus.COMPLETED] as OrderStatus[]).includes(status)
             ? new Date(createdAt.getTime() + 24 * 60 * 60 * 1000)
             : null,
           completedAt: status === OrderStatus.COMPLETED
             ? new Date(createdAt.getTime() + 3 * 24 * 60 * 60 * 1000)
             : null,
-          cancelledAt: [OrderStatus.CANCELLED, OrderStatus.DECLINED].includes(status)
+          cancelledAt: ([OrderStatus.CANCELLED, OrderStatus.DECLINED] as OrderStatus[]).includes(status)
             ? new Date(createdAt.getTime() + 12 * 60 * 60 * 1000)
             : null,
           cancelReason: status === OrderStatus.CANCELLED ? 'Test cancellation' : null,
