@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { Send, ArrowLeft, User, Heart, Search, Loader2 } from "lucide-react";
+import { Send, ArrowLeft, User, Loader2 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
 import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
@@ -14,7 +13,7 @@ interface Message {
   content: string;
   senderId: string;
   createdAt: Date;
-  sender: {
+  sender?: {
     id: string;
     username: string;
   };
@@ -56,7 +55,7 @@ function MessagesPageContent() {
       const orderRes = await fetch(`/api/orders/${orderIdParam}`);
       if (!orderRes.ok) {
         console.error("Failed to fetch order");
-        router.replace("/messages");
+        router.replace("/dashboard/messages");
         return;
       }
       const order = await orderRes.json();
@@ -65,7 +64,7 @@ function MessagesPageContent() {
       const settingsRes = await fetch("/api/settings");
       if (!settingsRes.ok) {
         console.error("Failed to fetch user settings");
-        router.replace("/messages");
+        router.replace("/dashboard/messages");
         return;
       }
       const settings = await settingsRes.json();
@@ -76,7 +75,6 @@ function MessagesPageContent() {
       const recipientId = isBuyer ? order.seller.userId : order.buyerId;
       
       // Send a placeholder message to create/get conversation
-      // We'll use the API which finds or creates conversation based on recipientId
       const msgRes = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,10 +103,10 @@ function MessagesPageContent() {
       }
       
       // Clear the order param from URL
-      router.replace("/messages");
+      router.replace("/dashboard/messages");
     } catch (error) {
       console.error("Error starting conversation from order:", error);
-      router.replace("/messages");
+      router.replace("/dashboard/messages");
     } finally {
       setIsStartingConversation(false);
     }
@@ -120,14 +118,12 @@ function MessagesPageContent() {
       try {
         const res = await fetch("/api/messages");
         if (!res.ok) {
-          // User might not be synced to DB yet, or not logged in
           console.error("Failed to fetch conversations:", res.status);
           setConversations([]);
           return;
         }
         const data = await res.json();
         const convos = data.conversations || data;
-        // Ensure data is an array
         setConversations(Array.isArray(convos) ? convos : []);
       } catch (error) {
         console.error("Error fetching conversations:", error);
@@ -218,13 +214,12 @@ function MessagesPageContent() {
 
   const getOtherUser = (conv: Conversation) => {
     if (!user) return conv.buyer;
-    // This is simplified - in reality you'd compare with actual user ID
     return conv.buyer.username === user.username ? conv.seller : conv.buyer;
   };
 
   if (isLoading || isStartingConversation) {
     return (
-      <div className="min-h-screen bg-amber-50 flex items-center justify-center flex-col gap-4">
+      <div className="flex items-center justify-center py-12 flex-col gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
         {isStartingConversation && (
           <p className="text-amber-600">Starting conversation...</p>
@@ -234,168 +229,141 @@ function MessagesPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-amber-50">
-      {/* Site Header */}
-      <header className="bg-white border-b border-amber-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
-                <span className="text-white text-xl">🥚</span>
-              </div>
-              <span className="text-xl font-bold text-amber-900">Eggbook</span>
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link href="/explore" className="text-amber-600 hover:text-amber-700">
-                <Search className="w-6 h-6" />
-              </Link>
-              <Link href="/favorites" className="text-amber-600 hover:text-amber-700">
-                <Heart className="w-6 h-6" />
-              </Link>
-              <Link href="/dashboard">
-                <Button variant="outline" size="sm">Dashboard</Button>
-              </Link>
+    <div className="h-[calc(100vh-8rem)] flex flex-col">
+      {/* Page Title / Conversation Header */}
+      <div className="bg-white border-b border-amber-200 p-4 flex items-center gap-4 rounded-t-lg">
+        {selectedConversation ? (
+          <>
+            <button
+              onClick={() => setSelectedConversation(null)}
+              className="md:hidden"
+            >
+              <ArrowLeft className="w-6 h-6 text-amber-600" />
+            </button>
+            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+              <User className="w-5 h-5 text-amber-600" />
             </div>
-          </div>
-        </div>
-      </header>
+            <div>
+              <h1 className="font-semibold text-amber-900">
+                @{getOtherUser(selectedConversation).username}
+              </h1>
+            </div>
+          </>
+        ) : (
+          <h1 className="text-xl font-bold text-amber-900">Messages</h1>
+        )}
+      </div>
 
-      <div className="max-w-4xl mx-auto h-[calc(100vh-64px)] flex flex-col">
-        {/* Page Title / Conversation Header */}
-        <div className="bg-white border-b border-amber-200 p-4 flex items-center gap-4">
-          {selectedConversation ? (
-            <>
-              <button
-                onClick={() => setSelectedConversation(null)}
-                className="md:hidden"
-              >
-                <ArrowLeft className="w-6 h-6 text-amber-600" />
-              </button>
-              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                <User className="w-5 h-5 text-amber-600" />
-              </div>
-              <div>
-                <h1 className="font-semibold text-amber-900">
-                  @{getOtherUser(selectedConversation).username}
-                </h1>
-              </div>
-            </>
+      <div className="flex-1 flex overflow-hidden bg-white rounded-b-lg border border-t-0 border-amber-200">
+        {/* Conversation List */}
+        <div
+          className={`w-full md:w-80 border-r border-amber-200 bg-white overflow-y-auto ${
+            selectedConversation ? "hidden md:block" : ""
+          }`}
+        >
+          {conversations.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="text-amber-600">No conversations yet</p>
+              <p className="text-sm text-amber-500 mt-2">
+                Start a conversation by messaging a seller
+              </p>
+            </div>
           ) : (
-            <h1 className="text-xl font-bold text-amber-900">Messages</h1>
+            conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => setSelectedConversation(conv)}
+                className={`w-full p-4 flex items-start gap-3 hover:bg-amber-50 border-b border-amber-100 text-left ${
+                  selectedConversation?.id === conv.id ? "bg-amber-50" : ""
+                }`}
+              >
+                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start">
+                    <p className="font-medium text-amber-900 truncate">
+                      @{getOtherUser(conv).username}
+                    </p>
+                    {conv._count && conv._count.messages > 0 && (
+                      <span className="bg-amber-500 text-white text-xs rounded-full px-2 py-0.5">
+                        {conv._count.messages}
+                      </span>
+                    )}
+                  </div>
+                  {conv.messages?.[0] && (
+                    <p className="text-sm text-amber-600 truncate">
+                      {conv.messages[0].content}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))
           )}
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* Conversation List */}
-          <div
-            className={`w-full md:w-80 border-r border-amber-200 bg-white overflow-y-auto ${
-              selectedConversation ? "hidden md:block" : ""
-            }`}
-          >
-            {conversations.length === 0 ? (
-              <div className="p-8 text-center">
-                <p className="text-amber-600">No conversations yet</p>
-                <p className="text-sm text-amber-500 mt-2">
-                  Start a conversation by messaging a seller
-                </p>
-              </div>
-            ) : (
-              conversations.map((conv) => (
-                <button
-                  key={conv.id}
-                  onClick={() => setSelectedConversation(conv)}
-                  className={`w-full p-4 flex items-start gap-3 hover:bg-amber-50 border-b border-amber-100 text-left ${
-                    selectedConversation?.id === conv.id ? "bg-amber-50" : ""
-                  }`}
-                >
-                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <User className="w-5 h-5 text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start">
-                      <p className="font-medium text-amber-900 truncate">
-                        @{getOtherUser(conv).username}
-                      </p>
-                      {conv._count && conv._count.messages > 0 && (
-                        <span className="bg-amber-500 text-white text-xs rounded-full px-2 py-0.5">
-                          {conv._count.messages}
-                        </span>
-                      )}
-                    </div>
-                    {conv.messages?.[0] && (
-                      <p className="text-sm text-amber-600 truncate">
-                        {conv.messages[0].content}
-                      </p>
-                    )}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-
-          {/* Message Thread */}
-          <div
-            className={`flex-1 flex flex-col bg-amber-50 ${
-              !selectedConversation ? "hidden md:flex" : ""
-            }`}
-          >
-            {selectedConversation ? (
-              <>
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {messages.map((message) => {
-                    const isOwnMessage = message.sender?.username === user?.username;
-                    return (
+        {/* Message Thread */}
+        <div
+          className={`flex-1 flex flex-col bg-amber-50 ${
+            !selectedConversation ? "hidden md:flex" : ""
+          }`}
+        >
+          {selectedConversation ? (
+            <>
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map((message) => {
+                  const isOwnMessage = message.sender?.username === user?.username;
+                  return (
+                    <div
+                      key={message.id}
+                      className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
+                    >
                       <div
-                        key={message.id}
-                        className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
+                        className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                          isOwnMessage
+                            ? "bg-amber-500 text-white"
+                            : "bg-white text-amber-900"
+                        }`}
                       >
-                        <div
-                          className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                            isOwnMessage
-                              ? "bg-amber-500 text-white"
-                              : "bg-white text-amber-900"
+                        <p>{message.content}</p>
+                        <p
+                          className={`text-xs mt-1 ${
+                            isOwnMessage ? "text-amber-100" : "text-amber-500"
                           }`}
                         >
-                          <p>{message.content}</p>
-                          <p
-                            className={`text-xs mt-1 ${
-                              isOwnMessage ? "text-amber-100" : "text-amber-500"
-                            }`}
-                          >
-                            {formatRelativeTime(message.createdAt)}
-                          </p>
-                        </div>
+                          {formatRelativeTime(message.createdAt)}
+                        </p>
                       </div>
-                    );
-                  })}
-                  <div ref={messagesEndRef} />
-                </div>
-
-                {/* Message Input */}
-                <form
-                  onSubmit={sendMessage}
-                  className="p-4 bg-white border-t border-amber-200"
-                >
-                  <div className="flex gap-2">
-                    <Input
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Type a message..."
-                      className="flex-1"
-                    />
-                    <Button type="submit" disabled={!newMessage.trim()}>
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </form>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <p className="text-amber-600">Select a conversation to start messaging</p>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
               </div>
-            )}
-          </div>
+
+              {/* Message Input */}
+              <form
+                onSubmit={sendMessage}
+                className="p-4 bg-white border-t border-amber-200"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Type a message..."
+                    className="flex-1"
+                  />
+                  <Button type="submit" disabled={!newMessage.trim()}>
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              </form>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-amber-600">Select a conversation to start messaging</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

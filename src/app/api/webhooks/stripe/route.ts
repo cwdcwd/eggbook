@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -32,12 +33,32 @@ export async function POST(req: Request) {
       const orderId = session.metadata?.orderId;
 
       if (orderId) {
+        // Get current order to log status change
+        const existingOrder = await db.order.findUnique({
+          where: { id: orderId },
+          select: { status: true },
+        });
+
         await db.order.update({
           where: { id: orderId },
           data: {
             status: "PAID",
             stripePaymentId: session.payment_intent as string,
             paidAt: new Date(),
+          },
+        });
+
+        // Log status change to audit trail
+        await logOrderStatusChange({
+          orderId,
+          fromStatus: existingOrder?.status || null,
+          toStatus: "PAID",
+          changedByType: "SYSTEM",
+          reason: "Payment completed via Stripe",
+          metadata: {
+            stripeEventId: event.id,
+            stripeSessionId: session.id,
+            stripePaymentIntentId: session.payment_intent,
           },
         });
 
@@ -115,14 +136,47 @@ export async function POST(req: Request) {
       const paymentIntentId = charge.payment_intent as string;
 
       if (paymentIntentId) {
-        await db.order.updateMany({
-          where: { stripePaymentId: paymentIntentId },
-          data: {
-            status: "CANCELLED",
-            cancelledAt: new Date(),
-            cancelReason: "Refunded",
+        // Find the order that hasn't been cancelled yet (idempotency guard)
+        const order = await db.order.findFirst({
+          where: {
+            stripePaymentId: paymentIntentId,
+            status: { not: "CANCELLED" }, // Only process if not already cancelled
           },
         });
+
+        if (order) {
+          await db.$transaction(async (tx) => {
+            await tx.order.update({
+              where: { id: order.id },
+              data: {
+                status: "CANCELLED",
+                cancelledAt: new Date(),
+                cancelReason: "Refunded",
+              },
+            });
+            await tx.eggListing.update({
+              where: { id: order.listingId },
+              data: {
+                stockCount: { increment: order.quantity },
+              },
+            });
+
+            // Log status change to audit trail
+            await logOrderStatusChange({
+              orderId: order.id,
+              fromStatus: order.status,
+              toStatus: "CANCELLED",
+              changedByType: "SYSTEM",
+              reason: "Refunded via Stripe",
+              metadata: {
+                stripeEventId: event.id,
+                stripeChargeId: charge.id,
+                stripePaymentIntentId: paymentIntentId,
+              },
+              tx,
+            });
+          });
+        }
       }
       break;
     }

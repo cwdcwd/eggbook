@@ -71,11 +71,55 @@ export async function createPaymentIntent(
 export async function createCheckoutSession(
   orderId: string,
   amount: number, // in cents
-  sellerStripeAccountId: string,
+  sellerStripeAccountId: string | null,
   platformFee: number, // in cents
   successUrl: string,
   cancelUrl: string
 ) {
+  // Use Connect transfers if seller has Stripe account and Connect is enabled
+  const useConnect = !!sellerStripeAccountId && process.env.STRIPE_CONNECT_ENABLED !== 'false'
+  
+  // Try Connect transfer first, fall back to direct payment if seller account lacks capabilities
+  if (useConnect) {
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: 'Egg Order',
+              },
+              unit_amount: amount,
+            },
+            quantity: 1,
+          },
+        ],
+        payment_intent_data: {
+          application_fee_amount: platformFee,
+          transfer_data: {
+            destination: sellerStripeAccountId!,
+          },
+          metadata: { orderId },
+        },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: { orderId },
+      })
+      return session
+    } catch (error: unknown) {
+      // Fall back to direct payment if seller lacks transfer capability
+      const stripeError = error as { code?: string }
+      if (stripeError.code === 'insufficient_capabilities_for_transfer') {
+        console.warn(`Seller account ${sellerStripeAccountId} lacks transfer capability, falling back to direct payment`)
+      } else {
+        throw error // Re-throw other errors
+      }
+    }
+  }
+  
+  // Direct payment (no Connect transfer)
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     line_items: [
@@ -91,10 +135,6 @@ export async function createCheckoutSession(
       },
     ],
     payment_intent_data: {
-      application_fee_amount: platformFee,
-      transfer_data: {
-        destination: sellerStripeAccountId,
-      },
       metadata: { orderId },
     },
     success_url: successUrl,

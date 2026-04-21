@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   const eventType = evt.type;
 
   if (eventType === "user.created") {
-    const { id, email_addresses, username } = evt.data;
+    const { id, email_addresses, username, image_url } = evt.data;
     const email = email_addresses[0]?.email_address;
 
     if (!email) {
@@ -66,17 +66,27 @@ export async function POST(req: Request) {
   }
 
   if (eventType === "user.updated") {
-    const { id, email_addresses, username } = evt.data;
+    const { id, email_addresses, username, image_url } = evt.data;
     const email = email_addresses[0]?.email_address;
 
     if (email) {
-      await db.user.update({
+      // Update user
+      const user = await db.user.update({
         where: { clerkId: id },
         data: {
           email,
           username: username || email.split("@")[0],
         },
+        include: { sellerProfile: true },
       });
+
+      // Sync Clerk avatar to seller profile only if no custom avatar set
+      if (user.sellerProfile && image_url && !user.sellerProfile.avatarUrl) {
+        await db.sellerProfile.update({
+          where: { id: user.sellerProfile.id },
+          data: { avatarUrl: image_url },
+        });
+      }
     }
   }
 

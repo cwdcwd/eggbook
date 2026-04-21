@@ -7,7 +7,9 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/@(.*)',           // Public seller profiles
+  '/checkout/(.*)/success', // Checkout success page (Stripe redirect)
   '/api/webhooks(.*)', // Webhook endpoints
+  '/api/search(.*)',   // Search API (public for explore page)
 ])
 
 // Admin routes

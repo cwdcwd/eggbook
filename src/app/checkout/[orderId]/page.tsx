@@ -114,7 +114,15 @@ export default function CheckoutPage({
     );
   }
 
-  const canPay = order.status === "CONFIRMED" && order.seller.stripeOnboarded;
+  const canPay = order.status === "CONFIRMED"; // Stripe fallback handles unboarded sellers
+
+  const getButtonText = () => {
+    if (isProcessing) return "Processing...";
+    if (order.status === "PENDING") return "Awaiting Confirmation";
+    if (order.status === "PAID") return "Already Paid";
+    if (order.status === "CONFIRMED") return "Pay Now";
+    return "Payment Not Available";
+  };
 
   return (
     <div className="min-h-screen bg-amber-50">
@@ -140,23 +148,9 @@ export default function CheckoutPage({
                 <div className="flex items-center gap-3">
                   <Clock className="w-5 h-5 text-amber-600" />
                   <div>
-                    <p className="font-medium text-amber-900">Waiting for seller confirmation</p>
+                    <p className="font-medium text-amber-900">Awaiting seller confirmation</p>
                     <p className="text-sm text-amber-600">
-                      The seller needs to confirm your order before you can pay.
-                    </p>
-                  </div>
-                </div>
-              </Card>
-            )}
-
-            {order.status === "CONFIRMED" && !order.seller.stripeOnboarded && (
-              <Card className="p-4 bg-amber-100 border-amber-300">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-600" />
-                  <div>
-                    <p className="font-medium text-amber-900">Seller needs to set up payments</p>
-                    <p className="text-sm text-amber-600">
-                      The seller hasn't completed their payment setup yet. Please contact them.
+                      The seller needs to confirm your order before you can pay. You&apos;ll be notified when it&apos;s ready.
                     </p>
                   </div>
                 </div>
@@ -282,7 +276,7 @@ export default function CheckoutPage({
                 isLoading={isProcessing}
               >
                 <CreditCard className="w-4 h-4 mr-2" />
-                {canPay ? "Pay Now" : "Payment Not Available"}
+                {getButtonText()}
               </Button>
 
               {order.status === "CONFIRMED" && (

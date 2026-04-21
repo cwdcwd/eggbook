@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { triggerNewMessage } from "@/lib/pusher";
+import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
 import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
@@ -100,6 +100,20 @@ export async function POST(req: NextRequest) {
       content: message.content,
       senderId: message.senderId,
       createdAt: message.createdAt,
+      sender: {
+        id: message.sender.id,
+        username: message.sender.username,
+      },
+    });
+
+    // Notify the recipient about the new message (for unread badge)
+    const recipientUserId = conversation.buyerId === user.id 
+      ? conversation.sellerId 
+      : conversation.buyerId;
+    await triggerUserNewMessage(recipientUserId, {
+      conversationId: conversation.id,
+      senderId: user.id,
+      senderUsername: user.username,
     });
 
     return NextResponse.json(message);
@@ -150,14 +164,31 @@ export async function GET(req: NextRequest) {
       }
 
       // Mark messages as read
-      await db.message.updateMany({
+      const unreadMessages = await db.message.findMany({
         where: {
           conversationId,
           senderId: { not: user.id },
           read: false,
         },
-        data: { read: true },
+        select: { senderId: true },
       });
+
+      if (unreadMessages.length > 0) {
+        await db.message.updateMany({
+          where: {
+            conversationId,
+            senderId: { not: user.id },
+            read: false,
+          },
+          data: { read: true },
+        });
+
+        // Notify senders that their messages were read
+        const senderIds = [...new Set(unreadMessages.map(m => m.senderId))];
+        for (const senderId of senderIds) {
+          await triggerMessagesRead(senderId, conversationId);
+        }
+      }
 
       return NextResponse.json(conversation);
     } else {
@@ -187,7 +218,8 @@ export async function GET(req: NextRequest) {
         orderBy: { updatedAt: "desc" },
       });
 
-      return NextResponse.json(conversations);
+      // Include userId for Pusher subscription
+      return NextResponse.json({ conversations, userId: user.id });
     }
   } catch (error) {
     console.error("Error fetching messages:", error);

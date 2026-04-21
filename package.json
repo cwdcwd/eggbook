@@ -7,7 +7,11 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:cleanup": "tsx scripts/cleanup.ts",
+    "db:cleanup:dry": "tsx scripts/cleanup.ts --dry-run",
+    "db:reset": "tsx scripts/cleanup.ts --force && tsx scripts/seed.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.0.7",
@@ -18,6 +22,7 @@
     "@vercel/blob": "^2.3.2",
     "@vercel/postgres": "^0.10.0",
     "clsx": "^2.1.1",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.7.0",
     "next": "16.2.1",
     "next-pwa": "^5.6.0",
@@ -27,6 +32,7 @@
     "pusher-js": "^8.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-leaflet": "^5.0.0",
     "stripe": "^21.0.1",
     "svix": "^1.89.0",
     "tailwind-merge": "^3.5.0",
@@ -34,6 +40,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/leaflet": "^1.9.21",
     "@types/node": "^20.19.37",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
@@ -41,6 +48,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

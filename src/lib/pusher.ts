@@ -1,20 +1,36 @@
 import Pusher from 'pusher'
 import PusherClient from 'pusher-js'
 
-// Server-side Pusher instance
-export const pusherServer = new Pusher({
-  appId: process.env.PUSHER_APP_ID!,
-  key: process.env.PUSHER_KEY!,
-  secret: process.env.PUSHER_SECRET!,
-  cluster: process.env.PUSHER_CLUSTER!,
-  useTLS: true,
-})
+// Check if Pusher is configured
+const isPusherConfigured = !!(
+  process.env.PUSHER_APP_ID &&
+  process.env.PUSHER_KEY &&
+  process.env.PUSHER_SECRET &&
+  process.env.PUSHER_CLUSTER
+)
+
+// Server-side Pusher instance (only if configured)
+export const pusherServer = isPusherConfigured
+  ? new Pusher({
+      appId: process.env.PUSHER_APP_ID!,
+      key: process.env.PUSHER_KEY!,
+      secret: process.env.PUSHER_SECRET!,
+      cluster: process.env.PUSHER_CLUSTER!,
+      useTLS: true,
+    })
+  : null
+
+// Check if client-side Pusher is configured
+const isClientPusherConfigured = !!(  process.env.NEXT_PUBLIC_PUSHER_KEY &&
+  process.env.NEXT_PUBLIC_PUSHER_CLUSTER
+)
 
 // Client-side Pusher instance (singleton)
 let pusherClientInstance: PusherClient | null = null
 
-export function getPusherClient() {
+export function getPusherClient(): PusherClient | null {
   if (typeof window === 'undefined') return null
+  if (!isClientPusherConfigured) return null
   
   if (!pusherClientInstance) {
     pusherClientInstance = new PusherClient(
@@ -40,6 +56,8 @@ export const EVENTS = {
   NEW_ORDER: 'new-order',
   ORDER_UPDATE: 'order-update',
   TYPING: 'typing',
+  USER_NEW_MESSAGE: 'user-new-message',
+  MESSAGES_READ: 'messages-read',
 }
 
 // Trigger events
@@ -50,8 +68,13 @@ export async function triggerNewMessage(
     content: string
     senderId: string
     createdAt: Date
+    sender?: {
+      id: string
+      username: string
+    }
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(
     CHANNELS.conversation(conversationId),
     EVENTS.NEW_MESSAGE,
@@ -69,6 +92,7 @@ export async function triggerNewOrder(
     totalPrice: number
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(CHANNELS.seller(sellerId), EVENTS.NEW_ORDER, order)
 }
 
@@ -80,5 +104,36 @@ export async function triggerOrderUpdate(
     message?: string
   }
 ) {
+  if (!pusherServer) return
   await pusherServer.trigger(CHANNELS.user(userId), EVENTS.ORDER_UPDATE, update)
+}
+
+// Notify a user about a new message (for unread badge)
+export async function triggerUserNewMessage(
+  recipientId: string,
+  message: {
+    conversationId: string
+    senderId: string
+    senderUsername: string
+  }
+) {
+  if (!pusherServer) return
+  await pusherServer.trigger(
+    CHANNELS.user(recipientId),
+    EVENTS.USER_NEW_MESSAGE,
+    message
+  )
+}
+
+// Notify the sender that their messages have been read
+export async function triggerMessagesRead(
+  senderId: string,
+  conversationId: string
+) {
+  if (!pusherServer) return
+  await pusherServer.trigger(
+    CHANNELS.user(senderId),
+    EVENTS.MESSAGES_READ,
+    { conversationId }
+  )
 }

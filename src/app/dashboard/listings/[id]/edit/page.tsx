@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { ArrowLeft, Upload, X, Plus, Loader2 } from "lucide-react";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
@@ -37,6 +38,7 @@ export default function EditListingPage({
   params: Promise<{ id: string }>;
 }) {
   const router = useRouter();
+  const { has, isLoaded } = useAuth();
   const [listingId, setListingId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -55,9 +57,22 @@ export default function EditListingPage({
     stockCount: "",
   });
 
+  // Check subscription and redirect if not subscribed
+  useEffect(() => {
+    if (isLoaded) {
+      const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
+      if (!hasSellerSubscription) {
+        router.replace("/dashboard/listings");
+      }
+    }
+  }, [isLoaded, has, router]);
+
   // Load listing data
   useEffect(() => {
     async function loadListing() {
+      // Wait for auth to be loaded and subscription check to pass
+      if (!isLoaded || !has?.({ feature: "listing" })) return;
+      
       const { id } = await params;
       setListingId(id);
       
@@ -89,7 +104,16 @@ export default function EditListingPage({
       }
     }
     loadListing();
-  }, [params, router]);
+  }, [params, router, isLoaded, has]);
+
+  // Show loading while checking auth or loading listing
+  if (!isLoaded || !has?.({ feature: "listing" }) || isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+      </div>
+    );
+  }
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;

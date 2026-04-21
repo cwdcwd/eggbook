@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
-import { ArrowLeft, Upload, X, Plus } from "lucide-react";
+import { ArrowLeft, Upload, X, Plus, Loader2 } from "lucide-react";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
 
 const PRICING_UNITS = [
@@ -33,12 +34,12 @@ const SUGGESTED_TAGS = [
 
 export default function NewListingPage() {
   const router = useRouter();
+  const { has, isLoaded } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [photos, setPhotos] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
   const [pricingUnit, setPricingUnit] = useState("DOZEN");
-
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -47,6 +48,25 @@ export default function NewListingPage() {
     customUnitQty: "",
     stockCount: "",
   });
+
+  // Check subscription and redirect if not subscribed
+  useEffect(() => {
+    if (isLoaded) {
+      const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
+      if (!hasSellerSubscription) {
+        router.replace("/dashboard/listings");
+      }
+    }
+  }, [isLoaded, has, router]);
+
+  // Show loading while checking auth
+  if (!isLoaded || !has?.({ feature: "listing" })) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+      </div>
+    );
+  }
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
