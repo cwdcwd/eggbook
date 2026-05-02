@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${req.nextUrl.protocol}//${req.headers.get('host')}`;
     let stripeAccountId = user.sellerProfile.stripeAccountId;
 
     // Create Stripe account if doesn't exist

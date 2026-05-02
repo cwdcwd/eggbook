@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create Stripe checkout session
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${req.nextUrl.protocol}//${req.headers.get('host')}`;
     const amountInCents = Math.round(order.totalPrice * 100);
     const platformFeeInCents = Math.round(order.platformFee * 100);
 
