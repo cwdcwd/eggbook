@@ -42,10 +42,16 @@ export async function POST(req: NextRequest) {
       const account = await createConnectAccount(user.email);
       stripeAccountId = account.id;
 
-      // Save Stripe account ID
+      // Save Stripe account ID and persist payment method choice
       await db.sellerProfile.update({
         where: { id: user.sellerProfile.id },
-        data: { stripeAccountId },
+        data: { stripeAccountId, paymentMethod: "OWN_STRIPE" },
+      });
+    } else {
+      // Account exists but ensure payment method is persisted
+      await db.sellerProfile.update({
+        where: { id: user.sellerProfile.id },
+        data: { paymentMethod: "OWN_STRIPE" },
       });
     }
 

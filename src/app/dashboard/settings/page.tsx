@@ -119,7 +119,8 @@ function SettingsContent() {
     const stripeParam = searchParams.get("stripe");
     if (stripeParam === "success") {
       setMessage({ type: "success", text: "Stripe account connected successfully!" });
-      // Refresh Stripe status
+      // Reflect persisted payment method and refresh Stripe status
+      setProfile((prev) => ({ ...prev, paymentMethod: "OWN_STRIPE" }));
       fetch("/api/stripe").then(res => res.json()).then(setStripeStatus);
     } else if (stripeParam === "refresh") {
       setMessage({ type: "error", text: "Stripe setup incomplete. Please try again." });
