@@ -70,13 +70,14 @@ export async function startBeams(userId: string): Promise<void> {
 /**
  * Stop Beams and disassociate the device from the user.
  * Call this when the user logs out.
+ * No-op if Beams was never initialized (avoids triggering new SW registration on cleanup).
  */
 export async function stopBeams(): Promise<void> {
-  const client = await getBeamsClient();
-  if (!client) return;
+  if (!beamsClient) return;
 
   try {
-    await client.stop();
+    await beamsClient.stop();
+    beamsClient = null;
     console.log("[beams] Stopped push notifications");
   } catch (err) {
     console.error("[beams] Failed to stop:", err);

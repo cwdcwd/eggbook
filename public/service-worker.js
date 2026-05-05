@@ -1,7 +1,11 @@
 // Pusher Beams Service Worker
-// Source: @pusher/push-notifications-web (MIT License)
+// Source: @pusher/push-notifications-web@1.1.0 (MIT License)
 // Copyright (c) 2019 Pusher
 // See: https://github.com/pusher/push-notifications-web/blob/main/LICENSE
+//
+// Note: The internal "SDK version: v1.0.2" header below is set by the upstream
+// package build. This file is copied directly from
+// node_modules/@pusher/push-notifications-web/dist/service-worker.js
 //
 // SDK version: v1.0.2
 // Git commit: bc6831d1ab41b3b1a3de2297f7024efbb2772d8e
