@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
@@ -115,6 +116,19 @@ export async function POST(req: NextRequest) {
       senderId: user.id,
       senderUsername: user.username,
     });
+
+    // Push notification via Beams (need recipient's clerkId)
+    const recipient = await db.user.findUnique({
+      where: { id: recipientUserId },
+      select: { clerkId: true },
+    });
+    if (recipient) {
+      await notifyUser(recipient.clerkId, {
+        title: `New message from ${user.username}`,
+        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/messages`,
+      });
+    }
 
     return NextResponse.json(message);
   } catch (error) {

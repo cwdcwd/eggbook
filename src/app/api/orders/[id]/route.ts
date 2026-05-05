@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { triggerOrderUpdate } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -197,6 +198,21 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         orderId: updatedOrder.id,
         status: updatedOrder.status,
         message: `Order ${action}ed`,
+      }),
+    ]);
+
+    // Push notifications via Beams
+    const statusLabel = updatedOrder.status.charAt(0) + updatedOrder.status.slice(1).toLowerCase();
+    await Promise.all([
+      notifyUser(buyerUserId, {
+        title: `Order ${statusLabel}`,
+        body: `Your order #${updatedOrder.id.slice(-6)} has been ${statusLabel.toLowerCase()}`,
+        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+      }),
+      notifyUser(sellerUserId, {
+        title: `Order ${statusLabel}`,
+        body: `Order #${updatedOrder.id.slice(-6)} is now ${statusLabel.toLowerCase()}`,
+        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
       }),
     ]);
 

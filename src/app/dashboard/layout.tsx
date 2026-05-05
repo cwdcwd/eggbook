@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
+import { startBeams } from "@/lib/beams-client";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -229,6 +230,12 @@ export default function DashboardLayout({
     setIsCollapsed(newState);
     localStorage.setItem("sidebar-collapsed", String(newState));
   };
+
+  // Initialize Pusher Beams for push notifications
+  useEffect(() => {
+    if (!clerkUserId) return;
+    startBeams(clerkUserId);
+  }, [clerkUserId]);
 
   return (
     <div className="min-h-screen bg-amber-50">

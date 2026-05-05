@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { logOrderStatusChange } from "@/lib/order-audit";
 
@@ -120,6 +121,13 @@ export async function POST(req: NextRequest) {
       listingTitle: listing.title,
       quantity,
       totalPrice,
+    });
+
+    // Push notification via Beams
+    await notifyUser(listing.seller.user.clerkId, {
+      title: "New Order",
+      body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
+      deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
     });
 
     return NextResponse.json(order);

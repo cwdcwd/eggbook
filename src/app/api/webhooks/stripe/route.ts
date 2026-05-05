@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { notifyUser } from "@/lib/beams-server";
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
         // Update seller's monthly volume
         const order = await db.order.findUnique({
           where: { id: orderId },
-          include: { seller: true },
+          include: { seller: { include: { user: true } } },
         });
 
         if (order) {
@@ -135,6 +136,13 @@ export async function POST(req: Request) {
               data: { feeTier: newTier },
             });
           }
+
+          // Notify seller that payment was received
+          await notifyUser(order.seller.user.clerkId, {
+            title: "Payment Received",
+            body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
+            deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+          });
         }
       }
       break;
