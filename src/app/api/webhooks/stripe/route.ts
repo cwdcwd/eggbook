@@ -15,30 +15,38 @@ export async function POST(req: Request) {
     return new Response("Missing stripe-signature header", { status: 400 });
   }
 
-  let event: Stripe.Event;
-
+  // Parse thin event notification (Stripe endpoint configured with "Thin" payload style)
+  let notification: Stripe.Events.UnknownEventNotification;
   try {
-    event = stripe.webhooks.constructEvent(
+    notification = stripe.parseEventNotification(
       body,
       signature,
       process.env.STRIPE_WEBHOOK_SECRET!
-    );
+    ) as Stripe.Events.UnknownEventNotification;
   } catch (err) {
     console.error("[stripe-webhook] Signature verification failed:", err);
     return new Response("Webhook signature verification failed", { status: 400 });
   }
 
-  console.log(`[stripe-webhook] Verified event: ${event.type} (${event.id})`);
+  const eventType = notification.type;
+  const eventId = notification.id;
+  console.log(`[stripe-webhook] Verified event: ${eventType} (${eventId})`);
 
-  // Handle events
-  switch (event.type) {
+  // With thin events, we need to fetch the full object from Stripe API
+  switch (eventType) {
     case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+      const relatedId = notification.related_object?.id;
+      if (!relatedId) {
+        console.log(`[stripe-webhook] checkout.session.completed - no related_object id`);
+        break;
+      }
+
+      const session = await stripe.checkout.sessions.retrieve(relatedId);
       const orderId = session.metadata?.orderId;
       console.log(`[stripe-webhook] checkout.session.completed - orderId: ${orderId}`);
 
       if (orderId) {
-        // Idempotency guard: only update if order is in CONFIRMED state
+        // Idempotency guard: only update if order hasn't already been paid
         const existingOrder = await db.order.findUnique({
           where: { id: orderId },
           select: { status: true },
@@ -66,7 +74,7 @@ export async function POST(req: Request) {
           changedByType: "SYSTEM",
           reason: "Payment completed via Stripe",
           metadata: {
-            stripeEventId: event.id,
+            stripeEventId: eventId,
             stripeSessionId: session.id,
             stripePaymentIntentId: session.payment_intent,
           },
@@ -130,8 +138,10 @@ export async function POST(req: Request) {
     }
 
     case "account.updated": {
-      const account = event.data.object as Stripe.Account;
-      
+      const relatedId = notification.related_object?.id;
+      if (!relatedId) break;
+
+      const account = await stripe.accounts.retrieve(relatedId);
       if (account.charges_enabled && account.details_submitted) {
         await db.sellerProfile.updateMany({
           where: { stripeAccountId: account.id },
@@ -142,7 +152,13 @@ export async function POST(req: Request) {
     }
 
     case "payment_intent.succeeded": {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const relatedId = notification.related_object?.id;
+      if (!relatedId) {
+        console.log(`[stripe-webhook] payment_intent.succeeded - no related_object id`);
+        break;
+      }
+
+      const paymentIntent = await stripe.paymentIntents.retrieve(relatedId);
       const piOrderId = paymentIntent.metadata?.orderId;
       console.log(`[stripe-webhook] payment_intent.succeeded - orderId: ${piOrderId}, pi: ${paymentIntent.id}`);
 
@@ -170,7 +186,7 @@ export async function POST(req: Request) {
             changedByType: "SYSTEM",
             reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
             metadata: {
-              stripeEventId: event.id,
+              stripeEventId: eventId,
               stripePaymentIntentId: paymentIntent.id,
             },
           });
@@ -183,7 +199,10 @@ export async function POST(req: Request) {
     }
 
     case "charge.refunded": {
-      const charge = event.data.object as Stripe.Charge;
+      const relatedId = notification.related_object?.id;
+      if (!relatedId) break;
+
+      const charge = await stripe.charges.retrieve(relatedId);
       const paymentIntentId = charge.payment_intent as string;
 
       if (paymentIntentId) {
@@ -191,7 +210,7 @@ export async function POST(req: Request) {
         const order = await db.order.findFirst({
           where: {
             stripePaymentId: paymentIntentId,
-            status: { not: "CANCELLED" }, // Only process if not already cancelled
+            status: { not: "CANCELLED" },
           },
         });
 
@@ -220,7 +239,7 @@ export async function POST(req: Request) {
               changedByType: "SYSTEM",
               reason: "Refunded via Stripe",
               metadata: {
-                stripeEventId: event.id,
+                stripeEventId: eventId,
                 stripeChargeId: charge.id,
                 stripePaymentIntentId: paymentIntentId,
               },
@@ -231,6 +250,9 @@ export async function POST(req: Request) {
       }
       break;
     }
+
+    default:
+      console.log(`[stripe-webhook] Unhandled event type: ${eventType}`);
   }
 
   return new Response("OK", { status: 200 });
