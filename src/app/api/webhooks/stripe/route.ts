@@ -137,8 +137,8 @@ export async function POST(req: Request) {
             });
           }
 
-          // Notify seller that payment was received
-          await notifyUser(order.seller.user.clerkId, {
+          // Notify seller that payment was received (fire-and-forget)
+          notifyUser(order.seller.user.clerkId, {
             title: "Payment Received",
             body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
             deepLink: `/dashboard/orders`,

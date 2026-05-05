@@ -1,3 +1,8 @@
+// Pusher Beams Service Worker
+// Source: @pusher/push-notifications-web (MIT License)
+// Copyright (c) 2019 Pusher
+// See: https://github.com/pusher/push-notifications-web/blob/main/LICENSE
+//
 // SDK version: v1.0.2
 // Git commit: bc6831d1ab41b3b1a3de2297f7024efbb2772d8e
 

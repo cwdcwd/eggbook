@@ -22,5 +22,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.json(beamsToken);
+  return NextResponse.json(beamsToken, {
+    headers: { "Cache-Control": "no-store" },
+  });
 }

@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
       select: { clerkId: true },
     });
     if (recipient) {
-      await notifyUser(recipient.clerkId, {
+      notifyUser(recipient.clerkId, {
         title: `New message from ${user.username}`,
         body: content.length > 100 ? content.slice(0, 100) + "..." : content,
         deepLink: `/dashboard/messages`,
