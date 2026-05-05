@@ -33,7 +33,10 @@ export async function POST(req: Request) {
   console.log(`[stripe-webhook] Verified event: ${eventType} (${eventId})`);
 
   // With thin events, we need to fetch the full object from Stripe API
-  switch (eventType) {
+  // V1 events may arrive with or without "v1." prefix in thin mode
+  const normalizedType = eventType.startsWith("v1.") ? eventType.slice(3) : eventType;
+
+  switch (normalizedType) {
     case "checkout.session.completed": {
       const relatedId = notification.related_object?.id;
       if (!relatedId) {
@@ -137,11 +140,14 @@ export async function POST(req: Request) {
       break;
     }
 
-    case "account.updated": {
+    case "account.updated":
+    case "v2.core.account.updated":
+    case "v2.core.account[identity].updated": {
       const relatedId = notification.related_object?.id;
       if (!relatedId) break;
 
       const account = await stripe.accounts.retrieve(relatedId);
+      console.log(`[stripe-webhook] account event - id: ${account.id}, charges_enabled: ${account.charges_enabled}, details_submitted: ${account.details_submitted}`);
       if (account.charges_enabled && account.details_submitted) {
         await db.sellerProfile.updateMany({
           where: { stripeAccountId: account.id },
