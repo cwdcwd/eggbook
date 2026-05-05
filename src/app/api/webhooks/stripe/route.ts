@@ -258,7 +258,7 @@ export async function POST(req: Request) {
     }
 
     default:
-      console.log(`[stripe-webhook] Unhandled event type: ${eventType}`);
+      console.log(`[stripe-webhook] Unhandled event type: ${eventType} (normalized: ${normalizedType})`);
   }
 
   return new Response("OK", { status: 200 });
