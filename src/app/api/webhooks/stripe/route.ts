@@ -9,6 +9,8 @@ export async function POST(req: Request) {
   const headersList = await headers();
   const signature = headersList.get("stripe-signature");
 
+  console.log("[stripe-webhook] Received request, signature present:", !!signature);
+
   if (!signature) {
     return new Response("Missing stripe-signature header", { status: 400 });
   }
@@ -22,22 +24,30 @@ export async function POST(req: Request) {
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err) {
-    console.error("Webhook signature verification failed:", err);
+    console.error("[stripe-webhook] Signature verification failed:", err);
     return new Response("Webhook signature verification failed", { status: 400 });
   }
+
+  console.log(`[stripe-webhook] Verified event: ${event.type} (${event.id})`);
 
   // Handle events
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
       const orderId = session.metadata?.orderId;
+      console.log(`[stripe-webhook] checkout.session.completed - orderId: ${orderId}`);
 
       if (orderId) {
-        // Get current order to log status change
+        // Idempotency guard: only update if order is in CONFIRMED state
         const existingOrder = await db.order.findUnique({
           where: { id: orderId },
           select: { status: true },
         });
+
+        if (existingOrder?.status === "PAID" || existingOrder?.status === "COMPLETED") {
+          console.log(`[stripe-webhook] Order ${orderId} already ${existingOrder.status}, skipping`);
+          break;
+        }
 
         await db.order.update({
           where: { id: orderId },
@@ -127,6 +137,47 @@ export async function POST(req: Request) {
           where: { stripeAccountId: account.id },
           data: { stripeOnboarded: true },
         });
+      }
+      break;
+    }
+
+    case "payment_intent.succeeded": {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const piOrderId = paymentIntent.metadata?.orderId;
+      console.log(`[stripe-webhook] payment_intent.succeeded - orderId: ${piOrderId}, pi: ${paymentIntent.id}`);
+
+      if (piOrderId) {
+        // Fallback: update order if checkout.session.completed didn't fire or was missed
+        const existingOrder = await db.order.findUnique({
+          where: { id: piOrderId },
+          select: { status: true },
+        });
+
+        if (existingOrder && existingOrder.status === "CONFIRMED") {
+          await db.order.update({
+            where: { id: piOrderId },
+            data: {
+              status: "PAID",
+              stripePaymentId: paymentIntent.id,
+              paidAt: new Date(),
+            },
+          });
+
+          await logOrderStatusChange({
+            orderId: piOrderId,
+            fromStatus: "CONFIRMED",
+            toStatus: "PAID",
+            changedByType: "SYSTEM",
+            reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
+            metadata: {
+              stripeEventId: event.id,
+              stripePaymentIntentId: paymentIntent.id,
+            },
+          });
+          console.log(`[stripe-webhook] Order ${piOrderId} updated to PAID via payment_intent fallback`);
+        } else {
+          console.log(`[stripe-webhook] Order ${piOrderId} status is ${existingOrder?.status}, no update needed`);
+        }
       }
       break;
     }
