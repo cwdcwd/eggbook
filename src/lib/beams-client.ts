@@ -6,8 +6,16 @@ let beamsClient: PusherPushNotifications.Client | null = null;
 let swRegistrationPromise: Promise<ServiceWorkerRegistration> | null = null;
 
 function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
+  if (!("serviceWorker" in navigator)) {
+    return Promise.reject(new Error("Service workers not supported"));
+  }
   if (!swRegistrationPromise) {
-    swRegistrationPromise = navigator.serviceWorker.register("/service-worker.js");
+    swRegistrationPromise = navigator.serviceWorker
+      .register("/service-worker.js")
+      .catch((err) => {
+        swRegistrationPromise = null; // Allow retry on transient failures
+        throw err;
+      });
   }
   return swRegistrationPromise;
 }

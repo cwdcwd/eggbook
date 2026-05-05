@@ -63,7 +63,7 @@ export async function notifyUser(
     });
   } catch (err) {
     // Don't let notification failures break the main flow
-    console.error("[beams-server] Failed to notify user:", userId, err);
+    console.error("[beams-server] Failed to notify user", err);
   }
 }
 
@@ -89,6 +89,6 @@ export async function notifyUsers(
       },
     });
   } catch (err) {
-    console.error("[beams-server] Failed to notify users:", userIds, err);
+    console.error("[beams-server] Failed to notify users (count:", userIds.length, ")", err);
   }
 }

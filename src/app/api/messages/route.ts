@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
       await notifyUser(recipient.clerkId, {
         title: `New message from ${user.username}`,
         body: content.length > 100 ? content.slice(0, 100) + "..." : content,
-        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/messages`,
+        deepLink: `/dashboard/messages`,
       });
     }
 

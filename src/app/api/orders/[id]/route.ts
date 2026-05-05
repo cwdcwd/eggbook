@@ -207,12 +207,12 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       notifyUser(buyerUserId, {
         title: `Order ${statusLabel}`,
         body: `Your order #${updatedOrder.id.slice(-6)} has been ${statusLabel.toLowerCase()}`,
-        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+        deepLink: `/dashboard/orders`,
       }),
       notifyUser(sellerUserId, {
         title: `Order ${statusLabel}`,
         body: `Order #${updatedOrder.id.slice(-6)} is now ${statusLabel.toLowerCase()}`,
-        deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+        deepLink: `/dashboard/orders`,
       }),
     ]);
 

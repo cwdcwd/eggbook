@@ -22,7 +22,5 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  console.log("[beams-auth] Token generated for user:", userId, "token length:", beamsToken.token.length);
-
   return NextResponse.json(beamsToken);
 }

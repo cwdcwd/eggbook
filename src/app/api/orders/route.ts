@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     await notifyUser(listing.seller.user.clerkId, {
       title: "New Order",
       body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
-      deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+      deepLink: `/dashboard/orders`,
     });
 
     return NextResponse.json(order);

@@ -141,7 +141,7 @@ export async function POST(req: Request) {
           await notifyUser(order.seller.user.clerkId, {
             title: "Payment Received",
             body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
-            deepLink: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/orders`,
+            deepLink: `/dashboard/orders`,
           });
         }
       }
