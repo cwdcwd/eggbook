@@ -5,6 +5,33 @@ const cuid = z.string().min(1).max(64);
 const latitude = z.number().min(-90).max(90);
 const longitude = z.number().min(-180).max(180);
 
+// Coerce helper: accepts both number and numeric string
+const coerceFinitePositive = (max: number) =>
+  z.union([
+    z.number().finite().positive().max(max),
+    z.string().transform((v, ctx) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n <= 0 || n > max) {
+        ctx.addIssue({ code: "custom", message: `Must be a positive number up to ${max}` });
+        return z.NEVER;
+      }
+      return n;
+    }),
+  ]);
+
+const coerceInt = (min: number, max: number) =>
+  z.union([
+    z.number().int().min(min).max(max),
+    z.string().transform((v, ctx) => {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n < min || n > max) {
+        ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
+        return z.NEVER;
+      }
+      return n;
+    }),
+  ]);
+
 // --- Orders ---
 
 export const CreateOrderSchema = z.object({
@@ -15,7 +42,10 @@ export const CreateOrderSchema = z.object({
   deliveryAddress: z.string().max(500).optional().nullable(),
   deliveryLat: latitude.optional().nullable(),
   deliveryLng: longitude.optional().nullable(),
-});
+}).refine(
+  (data) => data.fulfillmentType !== "DELIVERY" || (data.deliveryAddress && data.deliveryAddress.trim().length > 0),
+  { message: "Delivery address is required for delivery orders", path: ["deliveryAddress"] }
+);
 
 export const OrderActionSchema = z.object({
   action: z.enum(["confirm", "decline", "cancel", "markPaid", "complete"]),
@@ -47,11 +77,11 @@ export const SendMessageSchema = z.object({
 export const CreateListingSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(5000).optional().nullable(),
-  pricePerUnit: z.number().finite().positive().max(100000),
+  pricePerUnit: coerceFinitePositive(100000),
   unit: z.enum(["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"]),
   customUnitName: z.string().max(100).optional().nullable(),
-  customUnitQty: z.number().int().positive().max(10000).optional().nullable(),
-  stockCount: z.number().int().min(0).max(100000).optional(),
+  customUnitQty: coerceInt(1, 10000).optional().nullable(),
+  stockCount: coerceInt(0, 100000).optional(),
   photos: z.array(z.string().url().max(2048)).max(10).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
 }).refine(
@@ -87,7 +117,16 @@ export const UpdateSettingsSchema = z.object({
   zip: z.string().max(20).optional().nullable(),
   maxDeliveryDistance: z.union([
     z.number().finite().min(0).max(500),
-    z.string().transform((v) => (v ? parseFloat(v) : null)),
+    z.string().transform((v, ctx) => {
+      if (!v || v.trim() === "") return null;
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0 || n > 500) {
+        ctx.addIssue({ code: "custom", message: "Must be a number between 0 and 500" });
+        return z.NEVER;
+      }
+      return n;
+    }),
+    z.null(),
   ]).optional().nullable(),
   pickupType: z.enum(["TIMESLOT", "HOURS", "ARRANGED"]).optional(),
   paymentMethod: z.enum(["PLATFORM", "OWN_STRIPE"]).optional(),

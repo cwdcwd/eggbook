@@ -189,12 +189,20 @@ export async function GET(req: NextRequest) {
       if (status) {
         const parsed = OrderStatusParam.safeParse(status);
         if (!parsed.success) {
-          return {};
+          return null; // Signal invalid status
         }
         return { status: parsed.data as OrderStatus };
       }
       return {};
     };
+
+    const statusFilter = getStatusFilter();
+    if (statusFilter === null) {
+      return NextResponse.json(
+        { error: "Invalid status parameter" },
+        { status: 400 }
+      );
+    }
 
     let orders;
 
@@ -202,7 +210,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           sellerId: user.sellerProfile.id,
-          ...getStatusFilter(),
+          ...statusFilter,
         },
         include: {
           listing: true,
@@ -214,7 +222,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           buyerId: user.id,
-          ...getStatusFilter(),
+          ...statusFilter,
         },
         include: {
           listing: true,

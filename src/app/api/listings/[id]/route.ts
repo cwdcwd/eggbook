@@ -114,31 +114,47 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       })
     );
 
-    // Update listing (ownership in where clause prevents TOCTOU race)
-    const listing = await db.eggListing.update({
-      where: { id, sellerId: user.sellerProfile.id },
-      data: {
-        title: title.trim(),
-        description: description?.trim() || null,
-        pricePerUnit,
-        unit: unit as PricingUnit,
-        customUnitName: unit === "CUSTOM" ? customUnitName : null,
-        customUnitQty: unit === "CUSTOM" ? customUnitQty : null,
-        stockCount: stockCount || 0,
-        photos: photos || [],
-        isAvailable: isAvailable !== undefined ? isAvailable : existingListing.isAvailable,
-        tags: {
-          set: [], // Disconnect all existing tags
-          connect: tagConnections, // Connect new tags
+    // Update listing atomically with ownership check (updateMany supports non-unique where)
+    const sellerId = user.sellerProfile!.id;
+    const [updated] = await db.$transaction(async (tx) => {
+      const result = await tx.eggListing.updateMany({
+        where: { id, sellerId },
+        data: {
+          title: title.trim(),
+          description: description?.trim() || null,
+          pricePerUnit,
+          unit: unit as PricingUnit,
+          customUnitName: unit === "CUSTOM" ? customUnitName ?? null : null,
+          customUnitQty: unit === "CUSTOM" ? customUnitQty ?? null : null,
+          stockCount: stockCount || 0,
+          photos: photos || [],
+          isAvailable: isAvailable !== undefined ? isAvailable : existingListing.isAvailable,
         },
-      },
-      include: {
-        tags: true,
-      },
+      });
+
+      if (result.count === 0) {
+        throw new Error("NOT_AUTHORIZED");
+      }
+
+      // Update tags separately (updateMany doesn't support relations)
+      await tx.eggListing.update({
+        where: { id },
+        data: {
+          tags: {
+            set: [],
+            connect: tagConnections,
+          },
+        },
+      });
+
+      return [await tx.eggListing.findUnique({ where: { id }, include: { tags: true } })];
     });
 
-    return NextResponse.json(listing);
+    return NextResponse.json(updated);
   } catch (error) {
+    if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
+      return NextResponse.json({ error: "Not authorized to edit this listing" }, { status: 403 });
+    }
     console.error("Error updating listing:", error);
     return NextResponse.json({ error: "Failed to update listing" }, { status: 500 });
   }
@@ -192,10 +208,14 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Delete listing (ownership in where clause prevents TOCTOU race)
-    await db.eggListing.delete({
+    // Delete listing with atomic ownership check
+    const result = await db.eggListing.deleteMany({
       where: { id, sellerId: user.sellerProfile.id },
     });
+
+    if (result.count === 0) {
+      return NextResponse.json({ error: "Not authorized to delete this listing" }, { status: 403 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

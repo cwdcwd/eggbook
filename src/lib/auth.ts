@@ -3,17 +3,23 @@ import { db } from './db'
 
 /**
  * Verify admin access using Clerk session claims as source of truth.
- * Falls back to DB role check for compatibility, but Clerk claims take precedence.
+ * Falls back to DB role check ONLY when Clerk claims have no role metadata.
+ * Once Clerk claims exist, they are authoritative — DB cannot override.
  */
 export async function verifyAdmin(): Promise<boolean> {
   const { userId, sessionClaims } = await auth();
   if (!userId) return false;
 
   // Primary check: Clerk session claims (tamper-proof)
-  const clerkRole = (sessionClaims?.metadata as { role?: string } | undefined)?.role;
-  if (clerkRole === "admin") return true;
+  const metadata = sessionClaims?.metadata as { role?: string } | undefined;
+  const clerkRole = metadata?.role;
 
-  // Fallback: DB role check (for migration period — remove once all admins have Clerk claims)
+  // If Clerk metadata exists (even without role), it's authoritative — no DB fallback
+  if (metadata !== undefined) {
+    return clerkRole === "admin";
+  }
+
+  // Fallback: DB role check ONLY if Clerk has no metadata (migration period)
   const user = await db.user.findUnique({
     where: { clerkId: userId },
     select: { role: true },
