@@ -50,28 +50,6 @@ const coerceIntOptional = (min: number, max: number) =>
     }),
   ]);
 
-// Coerce helper for required int fields — empty string is an error
-const coerceInt = (min: number, max: number) =>
-  z.union([
-    z.number().int().min(min).max(max),
-    z.string().transform((v, ctx) => {
-      if (!v.trim()) {
-        ctx.addIssue({ code: "custom", message: "Required" });
-        return z.NEVER;
-      }
-      if (!STRICT_INT_RE.test(v.trim())) {
-        ctx.addIssue({ code: "custom", message: "Must be a valid integer" });
-        return z.NEVER;
-      }
-      const n = Number(v);
-      if (n < min || n > max) {
-        ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
-        return z.NEVER;
-      }
-      return n;
-    }),
-  ]);
-
 // --- Orders ---
 
 export const CreateOrderSchema = z.object({

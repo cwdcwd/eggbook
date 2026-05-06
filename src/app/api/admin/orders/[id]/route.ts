@@ -77,9 +77,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
     const updateData: Record<string, unknown> = { status };
 
+    const reason = cancelReason || `Admin status override to ${status}`;
+
     if (status === "CANCELLED") {
       updateData.cancelledAt = new Date();
-      updateData.cancelReason = cancelReason || "Cancelled by admin";
+      updateData.cancelReason = reason;
     } else if (status === "COMPLETED") {
       updateData.completedAt = new Date();
     }
@@ -87,7 +89,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const updatedOrder = await db.$transaction(async (tx) => {
       // Read current status inside transaction for accurate audit trail
       const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
-      if (!current) throw new Error("NOT_FOUND");
+      if (!current) {
+        return null;
+      }
 
       const updated = await tx.order.update({
         where: { id },
@@ -105,12 +109,16 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         toStatus: status,
         changedBy: userId,
         changedByType: "ADMIN",
-        reason: cancelReason || `Admin status override to ${status}`,
+        reason,
         tx,
       });
 
       return updated;
     });
+
+    if (!updatedOrder) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
 
     return NextResponse.json(updatedOrder);
   } catch (error) {
