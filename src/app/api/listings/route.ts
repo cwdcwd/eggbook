@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Clerk's has() is the authoritative subscription check
-    const hasListingFeature = has({ feature: "listing" });
+    const hasListingFeature = has?.({ feature: "listing" }) ?? false;
     if (!hasListingFeature) {
       return NextResponse.json(
         { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },

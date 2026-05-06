@@ -49,7 +49,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     // Clerk's has() is the authoritative subscription check
-    const hasListingFeature = has({ feature: "listing" });
+    const hasListingFeature = has?.({ feature: "listing" }) ?? false;
     if (!hasListingFeature) {
       return NextResponse.json(
         { error: "Seller subscription required to edit listings", code: "SUBSCRIPTION_REQUIRED" },

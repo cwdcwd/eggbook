@@ -37,7 +37,7 @@ async function getListings() {
 
 export default async function ListingsPage() {
   const { has } = await auth();
-  const hasSellerSubscription = has({ feature: "listing" });
+  const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
   const listings = await getListings();
 
   return (

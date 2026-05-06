@@ -79,7 +79,7 @@ async function getDashboardStats() {
 
 export default async function DashboardPage() {
   const { has } = await auth();
-  const hasSellerSubscription = has({ feature: "listing" });
+  const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
   const stats = await getDashboardStats();
 
   return (
