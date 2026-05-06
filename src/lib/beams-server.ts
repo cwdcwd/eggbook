@@ -24,12 +24,16 @@ function getBeamsServer(): PushNotifications | null {
 
 /**
  * Sanitize a deep link to prevent open-redirect attacks.
- * Only allows relative paths starting with "/".
+ * Beams requires deep_link to be a full URI. We only allow relative paths
+ * starting with "/" and prepend the app URL. Returns undefined if no valid
+ * link can be constructed.
  */
 function sanitizeDeepLink(deepLink: string | undefined): string | undefined {
   if (!deepLink) return undefined;
-  if (deepLink.startsWith("/") && !deepLink.startsWith("//")) return deepLink;
-  return undefined;
+  if (!deepLink.startsWith("/") || deepLink.startsWith("//")) return undefined;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl) return undefined;
+  return `${baseUrl}${deepLink}`;
 }
 
 /**

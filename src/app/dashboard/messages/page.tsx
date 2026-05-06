@@ -176,7 +176,9 @@ function MessagesPageContent() {
     const channel = pusher.subscribe(CHANNELS.conversation(selectedConversation.id));
 
     channel.bind(EVENTS.NEW_MESSAGE, (message: Message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) =>
+        prev.some((m) => m.id === message.id) ? prev : [...prev, message]
+      );
     });
 
     return () => {
@@ -205,6 +207,12 @@ function MessagesPageContent() {
       });
 
       if (res.ok) {
+        const sentMessage = await res.json();
+        setMessages((prev) =>
+          prev.some((m) => m.id === sentMessage.id)
+            ? prev
+            : [...prev, sentMessage]
+        );
         setNewMessage("");
       }
     } catch (error) {
