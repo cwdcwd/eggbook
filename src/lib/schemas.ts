@@ -181,20 +181,6 @@ export const UpdateSettingsSchema = z.object({
   autoAcceptOrders: z.boolean().optional(),
 });
 
-// --- Search ---
-
-export const SearchParamsSchema = z.object({
-  q: z.string().max(200).optional().default(""),
-  lat: z.number().min(-90).max(90).optional(),
-  lng: z.number().min(-180).max(180).optional(),
-  tags: z.string().max(500).optional(),
-  minPrice: z.number().finite().min(0).max(100000).optional(),
-  maxPrice: z.number().finite().min(0).max(100000).optional(),
-  delivery: z.boolean().optional(),
-  sort: z.enum(["relevance", "distance", "price_asc", "price_desc", "newest"]).optional().default("relevance"),
-  limit: z.number().int().min(1).max(100).optional().default(50),
-});
-
 // --- Admin ---
 
 export const AdminOrderStatusSchema = z.object({

@@ -50,6 +50,16 @@ export type RateLimitResult =
   | { success: true }
   | { success: false; response: NextResponse };
 
+export type RateLimitCategory = "mutation" | "message" | "upload" | "search" | "webhook";
+
+const RATE_LIMIT_CONFIGS: Record<RateLimitCategory, { requests: number; window: string }> = {
+  mutation: { requests: 30, window: "1 m" },
+  message: { requests: 20, window: "1 m" },
+  upload: { requests: 10, window: "1 m" },
+  search: { requests: 60, window: "1 m" },
+  webhook: { requests: 200, window: "1 m" },
+};
+
 /**
  * Check rate limit for a given identifier.
  * Returns { success: true } if allowed, or { success: false, response } with a 429 response.
@@ -57,17 +67,9 @@ export type RateLimitResult =
  */
 export async function rateLimit(
   identifier: string,
-  category: "mutation" | "message" | "upload" | "search" | "webhook"
+  category: RateLimitCategory
 ): Promise<RateLimitResult> {
-  const configs: Record<string, { requests: number; window: string }> = {
-    mutation: { requests: 30, window: "1 m" },
-    message: { requests: 20, window: "1 m" },
-    upload: { requests: 10, window: "1 m" },
-    search: { requests: 60, window: "1 m" },
-    webhook: { requests: 200, window: "1 m" },
-  };
-
-  const config = configs[category];
+  const config = RATE_LIMIT_CONFIGS[category];
   const limiter = getLimiter(category, config.requests, config.window);
 
   // No-op in local dev without Redis

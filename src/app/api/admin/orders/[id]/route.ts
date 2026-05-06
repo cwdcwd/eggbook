@@ -85,6 +85,10 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const updatedOrder = await db.$transaction(async (tx) => {
+      // Read current status inside transaction for accurate audit trail
+      const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
+      if (!current) throw new Error("NOT_FOUND");
+
       const updated = await tx.order.update({
         where: { id },
         data: updateData,
@@ -97,7 +101,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
       await logOrderStatusChange({
         orderId: id,
-        fromStatus: order.status,
+        fromStatus: current.status,
         toStatus: status,
         changedBy: userId,
         changedByType: "ADMIN",
