@@ -52,9 +52,9 @@ export function generateBeamsToken(userId: string):
   const instanceId = process.env.NEXT_PUBLIC_BEAMS_INSTANCE_ID!;
   const rawKey = process.env.BEAMS_SECRET_KEY!;
 
-  if (!HEX_REGEX.test(rawKey)) {
-    console.error("[beams-server] BEAMS_SECRET_KEY is not valid hex");
-    return { error: "Beams secret key is misconfigured", code: "INVALID_KEY" };
+  if (!HEX_REGEX.test(rawKey) || rawKey.length % 2 !== 0) {
+    console.error("[beams-server] BEAMS_SECRET_KEY is not valid hex (must be even-length hex string)");
+    return { error: "Beams secret key is misconfigured", code: "INVALID_KEY" as const };
   }
 
   const secretKey = Buffer.from(rawKey, "hex");
