@@ -53,3 +53,15 @@ export const db = new Proxy({} as PrismaClient, {
     return value
   },
 })
+
+// Graceful shutdown — close pool on process termination
+if (typeof process !== 'undefined') {
+  const shutdown = async () => {
+    if (global.pgPool) {
+      await global.pgPool.end()
+      global.pgPool = undefined
+    }
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+}

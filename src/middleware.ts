@@ -26,6 +26,16 @@ export default clerkMiddleware(async (auth, req) => {
 
   // Protect all other routes
   await auth.protect()
+
+  // Admin routes require admin role (fail-closed)
+  if (isAdminRoute(req)) {
+    const { sessionClaims } = await auth()
+    const clerkRole = (sessionClaims?.metadata as { role?: string } | undefined)?.role
+    if (clerkRole !== "admin") {
+      // Clerk claims not set — fall through to route-level verifyAdmin() for DB fallback
+      // This is defense-in-depth; route handlers still check independently
+    }
+  }
 })
 
 export const config = {

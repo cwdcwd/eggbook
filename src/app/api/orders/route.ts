@@ -8,6 +8,7 @@ import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { CreateOrderSchema, OrderStatusParam } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -16,6 +17,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const body = await req.json();
     const parsed = CreateOrderSchema.safeParse(body);

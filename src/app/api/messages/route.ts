@@ -5,6 +5,7 @@ import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@
 import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { SendMessageSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Send a message
 export async function POST(req: NextRequest) {
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "message");
+    if (!rl.success) return rl.response;
 
     const body = await req.json();
     const parsed = SendMessageSchema.safeParse(body);
