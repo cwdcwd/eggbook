@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
+import { SendMessageSchema } from "@/lib/schemas";
 
 // Send a message
 export async function POST(req: NextRequest) {
@@ -14,7 +15,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { conversationId, content, recipientId } = body;
+    const parsed = SendMessageSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { conversationId, content, recipientId } = parsed.data;
 
     const user = await getOrCreateUser(userId);
 

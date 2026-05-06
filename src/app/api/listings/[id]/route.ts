@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
+import { UpdateListingSchema } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -83,6 +84,10 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json();
+    const parsed = UpdateListingSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       title,
       description,
@@ -94,22 +99,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       photos,
       tags,
       isAvailable,
-    } = body;
-
-    // Validate required fields
-    if (!title || title.trim() === "") {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
-
-    if (!pricePerUnit || pricePerUnit <= 0) {
-      return NextResponse.json({ error: "Valid price is required" }, { status: 400 });
-    }
-
-    // Validate unit
-    const validUnits: PricingUnit[] = ["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"];
-    if (!validUnits.includes(unit as PricingUnit)) {
-      return NextResponse.json({ error: "Invalid pricing unit" }, { status: 400 });
-    }
+    } = parsed.data;
 
     // Handle tags - connect existing or create new ones
     const tagConnections = await Promise.all(
@@ -124,17 +114,17 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       })
     );
 
-    // Update listing
+    // Update listing (ownership in where clause prevents TOCTOU race)
     const listing = await db.eggListing.update({
-      where: { id },
+      where: { id, sellerId: user.sellerProfile.id },
       data: {
         title: title.trim(),
         description: description?.trim() || null,
-        pricePerUnit: parseFloat(pricePerUnit),
+        pricePerUnit,
         unit: unit as PricingUnit,
         customUnitName: unit === "CUSTOM" ? customUnitName : null,
-        customUnitQty: unit === "CUSTOM" ? parseInt(customUnitQty) : null,
-        stockCount: parseInt(stockCount) || 0,
+        customUnitQty: unit === "CUSTOM" ? customUnitQty : null,
+        stockCount: stockCount || 0,
         photos: photos || [],
         isAvailable: isAvailable !== undefined ? isAvailable : existingListing.isAvailable,
         tags: {
@@ -202,9 +192,9 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Delete listing
+    // Delete listing (ownership in where clause prevents TOCTOU race)
     await db.eggListing.delete({
-      where: { id },
+      where: { id, sellerId: user.sellerProfile.id },
     });
 
     return NextResponse.json({ success: true });

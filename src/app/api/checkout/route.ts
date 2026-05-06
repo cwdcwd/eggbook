@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { createCheckoutSession } from "@/lib/stripe";
 import { getOrCreateUser } from "@/lib/auth";
+import { CheckoutSchema } from "@/lib/schemas";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,11 +13,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { orderId } = body;
-
-    if (!orderId) {
-      return NextResponse.json({ error: "Order ID required" }, { status: 400 });
+    const parsed = CheckoutSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
     }
+    const { orderId } = parsed.data;
 
     // Get user
     const user = await getOrCreateUser(userId);

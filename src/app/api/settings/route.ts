@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { PickupType, PaymentMethod } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
+import { UpdateSettingsSchema } from "@/lib/schemas";
 
 // Allowed URL patterns for avatar sync (SSRF protection)
 const ALLOWED_AVATAR_PATTERNS = [
@@ -81,6 +83,10 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = UpdateSettingsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       displayName,
       bio,
@@ -93,16 +99,11 @@ export async function PUT(req: NextRequest) {
       pickupType,
       paymentMethod,
       autoAcceptOrders,
-    } = body;
-
-    // Validate required fields
-    if (!displayName || displayName.trim() === "") {
-      return NextResponse.json({ error: "Display name is required" }, { status: 400 });
-    }
+    } = parsed.data;
 
     // Parse maxDeliveryDistance
-    const maxDeliveryDistanceFloat = maxDeliveryDistance
-      ? parseFloat(maxDeliveryDistance)
+    const maxDeliveryDistanceFloat = typeof maxDeliveryDistance === 'number'
+      ? maxDeliveryDistance
       : null;
 
     // Upsert seller profile (create if doesn't exist)
@@ -117,8 +118,8 @@ export async function PUT(req: NextRequest) {
         state: state?.trim() || null,
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
+        pickupType: (pickupType || "ARRANGED") as PickupType,
+        paymentMethod: (paymentMethod || "PLATFORM") as PaymentMethod,
         autoAcceptOrders: autoAcceptOrders ?? true,
       },
       create: {
@@ -131,8 +132,8 @@ export async function PUT(req: NextRequest) {
         state: state?.trim() || null,
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
+        pickupType: (pickupType || "ARRANGED") as PickupType,
+        paymentMethod: (paymentMethod || "PLATFORM") as PaymentMethod,
         autoAcceptOrders: autoAcceptOrders ?? true,
       },
     });

@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { verifyAdmin } from "@/lib/auth";
+import { AdminOrderStatusSchema } from "@/lib/schemas";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
-}
-
-// Admin middleware helper
-async function verifyAdmin(userId: string) {
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-  });
-  return user?.role === "ADMIN";
 }
 
 // Get single order details
@@ -22,7 +17,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await verifyAdmin(userId);
+    const isAdmin = await verifyAdmin();
     if (!isAdmin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
@@ -59,14 +54,18 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await verifyAdmin(userId);
+    const isAdmin = await verifyAdmin();
     if (!isAdmin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
     const { id } = await params;
     const body = await req.json();
-    const { status, cancelReason } = body;
+    const parsed = AdminOrderStatusSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { status, cancelReason } = parsed.data;
 
     const order = await db.order.findUnique({
       where: { id },
@@ -76,11 +75,6 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const validStatuses = ["PENDING", "CONFIRMED", "PAID", "COMPLETED", "CANCELLED", "DECLINED"];
-    if (!validStatuses.includes(status)) {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-    }
-
     const updateData: Record<string, unknown> = { status };
 
     if (status === "CANCELLED") {
@@ -88,18 +82,30 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       updateData.cancelReason = cancelReason || "Cancelled by admin";
     } else if (status === "COMPLETED") {
       updateData.completedAt = new Date();
-    } else if (status === "PAID") {
-      updateData.paidAt = new Date();
     }
 
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: updateData,
-      include: {
-        listing: true,
-        buyer: true,
-        seller: { include: { user: true } },
-      },
+    const updatedOrder = await db.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id },
+        data: updateData,
+        include: {
+          listing: true,
+          buyer: true,
+          seller: { include: { user: true } },
+        },
+      });
+
+      await logOrderStatusChange({
+        orderId: id,
+        fromStatus: order.status,
+        toStatus: status,
+        changedBy: userId,
+        changedByType: "ADMIN",
+        reason: cancelReason || `Admin status override to ${status}`,
+        tx,
+      });
+
+      return updated;
     });
 
     return NextResponse.json(updatedOrder);

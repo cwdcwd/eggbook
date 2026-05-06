@@ -2,6 +2,26 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 
 /**
+ * Verify admin access using Clerk session claims as source of truth.
+ * Falls back to DB role check for compatibility, but Clerk claims take precedence.
+ */
+export async function verifyAdmin(): Promise<boolean> {
+  const { userId, sessionClaims } = await auth();
+  if (!userId) return false;
+
+  // Primary check: Clerk session claims (tamper-proof)
+  const clerkRole = (sessionClaims?.metadata as { role?: string } | undefined)?.role;
+  if (clerkRole === "admin") return true;
+
+  // Fallback: DB role check (for migration period — remove once all admins have Clerk claims)
+  const user = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { role: true },
+  });
+  return user?.role === "ADMIN";
+}
+
+/**
  * Get user from database, or create from Clerk data if not exists.
  * Handles the case where Clerk webhook hasn't synced the user yet.
  */

@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { verifyAdmin } from "@/lib/auth";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
-}
-
-// Admin middleware helper
-async function verifyAdmin(userId: string) {
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-  });
-  return user?.role === "ADMIN";
 }
 
 // Update listing (toggle availability, flag for review)
@@ -22,7 +15,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await verifyAdmin(userId);
+    const isAdmin = await verifyAdmin();
     if (!isAdmin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
@@ -71,7 +64,7 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await verifyAdmin(userId);
+    const isAdmin = await verifyAdmin();
     if (!isAdmin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
