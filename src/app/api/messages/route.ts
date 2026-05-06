@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 
 // Send a message
@@ -24,9 +25,10 @@ export async function POST(req: NextRequest) {
     let conversation;
 
     if (conversationId) {
-      // Use existing conversation
+      // Use existing conversation (include buyer/seller for push notification clerkId)
       conversation = await db.conversation.findUnique({
         where: { id: conversationId },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -46,6 +48,7 @@ export async function POST(req: NextRequest) {
             { buyerId: recipientId, sellerId: user.id },
           ],
         },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -67,6 +70,7 @@ export async function POST(req: NextRequest) {
             buyerId: isBuyer ? user.id : recipientId,
             sellerId: isBuyer ? recipientId : user.id,
           },
+          include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
         });
       }
     } else {
@@ -114,6 +118,19 @@ export async function POST(req: NextRequest) {
       conversationId: conversation.id,
       senderId: user.id,
       senderUsername: user.username,
+    });
+
+    // Push notification via Beams (clerkId included from conversation query)
+    const recipientClerkId = conversation.buyerId === user.id
+      ? conversation.seller.clerkId
+      : conversation.buyer.clerkId;
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(recipientClerkId, {
+        title: `New message from ${user.username}`,
+        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+        deepLink: `/dashboard/messages`,
+      });
     });
 
     return NextResponse.json(message);

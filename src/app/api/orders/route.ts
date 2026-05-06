@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { logOrderStatusChange } from "@/lib/order-audit";
 
@@ -120,6 +121,15 @@ export async function POST(req: NextRequest) {
       listingTitle: listing.title,
       quantity,
       totalPrice,
+    });
+
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(listing.seller.user.clerkId, {
+        title: "New Order",
+        body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
+        deepLink: `/dashboard/orders`,
+      });
     });
 
     return NextResponse.json(order);
