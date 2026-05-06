@@ -39,16 +39,22 @@ function sanitizeDeepLink(deepLink: string | undefined): string | undefined {
 /**
  * Generate a Beams token for authenticating a user's device.
  * Uses hex-decoded secret key for correct JWT signature.
+ * Returns { token } on success, or { error, code } on failure.
  */
-export function generateBeamsToken(userId: string) {
-  if (!isBeamsConfigured) return null;
+export function generateBeamsToken(userId: string):
+  | { token: string }
+  | { error: string; code: "NOT_CONFIGURED" | "INVALID_KEY" }
+{
+  if (!isBeamsConfigured) {
+    return { error: "Beams is not configured", code: "NOT_CONFIGURED" };
+  }
 
   const instanceId = process.env.NEXT_PUBLIC_BEAMS_INSTANCE_ID!;
   const rawKey = process.env.BEAMS_SECRET_KEY!;
 
   if (!HEX_REGEX.test(rawKey)) {
     console.error("[beams-server] BEAMS_SECRET_KEY is not valid hex");
-    return null;
+    return { error: "Beams secret key is misconfigured", code: "INVALID_KEY" };
   }
 
   const secretKey = Buffer.from(rawKey, "hex");
@@ -65,48 +71,52 @@ export function generateBeamsToken(userId: string) {
 
 /**
  * Send a push notification to a specific user.
- * No-op if Beams is not configured. Non-blocking (fire-and-forget).
+ * No-op if Beams is not configured. Failures are logged but do not throw.
  */
-export function notifyUser(
+export async function notifyUser(
   userId: string,
   notification: { title: string; body: string; deepLink?: string }
-): void {
+): Promise<void> {
   const beams = getBeamsServer();
   if (!beams) return;
 
-  beams.publishToUsers([userId], {
-    web: {
-      notification: {
-        title: notification.title,
-        body: notification.body,
-        deep_link: sanitizeDeepLink(notification.deepLink),
+  try {
+    await beams.publishToUsers([userId], {
+      web: {
+        notification: {
+          title: notification.title,
+          body: notification.body,
+          deep_link: sanitizeDeepLink(notification.deepLink),
+        },
       },
-    },
-  }).catch((err) => {
+    });
+  } catch (err) {
     console.error("[beams-server] Failed to notify user", err);
-  });
+  }
 }
 
 /**
  * Send a push notification to multiple users.
- * No-op if Beams is not configured. Non-blocking (fire-and-forget).
+ * No-op if Beams is not configured. Failures are logged but do not throw.
  */
-export function notifyUsers(
+export async function notifyUsers(
   userIds: string[],
   notification: { title: string; body: string; deepLink?: string }
-): void {
+): Promise<void> {
   const beams = getBeamsServer();
   if (!beams || userIds.length === 0) return;
 
-  beams.publishToUsers(userIds, {
-    web: {
-      notification: {
-        title: notification.title,
-        body: notification.body,
-        deep_link: sanitizeDeepLink(notification.deepLink),
+  try {
+    await beams.publishToUsers(userIds, {
+      web: {
+        notification: {
+          title: notification.title,
+          body: notification.body,
+          deep_link: sanitizeDeepLink(notification.deepLink),
+        },
       },
-    },
-  }).catch((err) => {
+    });
+  } catch (err) {
     console.error("[beams-server] Failed to notify users (count:", userIds.length, ")", err);
-  });
+  }
 }

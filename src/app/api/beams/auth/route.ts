@@ -15,10 +15,11 @@ export async function GET(req: NextRequest) {
   }
 
   const beamsToken = generateBeamsToken(userId);
-  if (!beamsToken) {
+  if ("error" in beamsToken) {
+    const status = beamsToken.code === "NOT_CONFIGURED" ? 503 : 500;
     return NextResponse.json(
-      { error: "Beams not configured" },
-      { status: 503 }
+      { error: beamsToken.error },
+      { status }
     );
   }
 

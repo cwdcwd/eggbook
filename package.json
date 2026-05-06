@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate && npm run copy-sw",
-    "copy-sw": "cp node_modules/@pusher/push-notifications-web/dist/service-worker.js public/service-worker.js",
+    "copy-sw": "node scripts/copy-sw.mjs",
     "db:seed": "tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup.ts",
     "db:cleanup:dry": "tsx scripts/cleanup.ts --dry-run",

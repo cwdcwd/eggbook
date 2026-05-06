@@ -123,8 +123,8 @@ export async function POST(req: NextRequest) {
       totalPrice,
     });
 
-    // Push notification via Beams (fire-and-forget)
-    notifyUser(listing.seller.user.clerkId, {
+    // Push notification via Beams
+    await notifyUser(listing.seller.user.clerkId, {
       title: "New Order",
       body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
       deepLink: `/dashboard/orders`,

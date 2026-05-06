@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
     const recipientClerkId = conversation.buyerId === user.id
       ? conversation.seller.clerkId
       : conversation.buyer.clerkId;
-    notifyUser(recipientClerkId, {
+    await notifyUser(recipientClerkId, {
       title: `New message from ${user.username}`,
       body: content.length > 100 ? content.slice(0, 100) + "..." : content,
       deepLink: `/dashboard/messages`,
