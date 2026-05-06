@@ -80,14 +80,6 @@ export async function requireSeller() {
   return user
 }
 
-export async function requireAdmin() {
-  const user = await getCurrentUser()
-  if (!user || user.role !== 'ADMIN') {
-    throw new Error('Admin access required')
-  }
-  return user
-}
-
 export async function syncUserFromClerk(clerkUser: {
   id: string
   username: string | null

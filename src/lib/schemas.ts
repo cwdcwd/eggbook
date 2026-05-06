@@ -78,7 +78,11 @@ export const CreateOrderSchema = z.object({
   listingId: cuid,
   quantity: z.number().int().positive().max(10000),
   fulfillmentType: z.enum(["PICKUP", "DELIVERY"]),
-  pickupTime: z.string().datetime().optional().nullable(),
+  // Accepts both datetime-local (YYYY-MM-DDTHH:mm) and full ISO 8601
+  pickupTime: z.string().regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/,
+    "Must be a valid date-time"
+  ).optional().nullable(),
   deliveryAddress: z.string().max(500).optional().nullable(),
   deliveryLat: latitude.optional().nullable(),
   deliveryLng: longitude.optional().nullable(),
