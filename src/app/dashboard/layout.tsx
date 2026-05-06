@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
-import { startBeams, stopBeams } from "@/lib/beams-client";
+import { startBeams } from "@/lib/beams-client";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -232,12 +232,12 @@ export default function DashboardLayout({
   };
 
   // Initialize Pusher Beams for push notifications
+  // Note: We don't stop Beams on unmount because navigating away from
+  // /dashboard shouldn't disable push notifications. Beams is stopped
+  // only on explicit sign-out (handled by Clerk's signOut callback).
   useEffect(() => {
     if (!clerkUserId) return;
     startBeams(clerkUserId);
-    return () => {
-      stopBeams();
-    };
   }, [clerkUserId]);
 
   return (

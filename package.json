@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && npm run copy-sw && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && npm run copy-sw",
+    "copy-sw": "cp node_modules/@pusher/push-notifications-web/dist/service-worker.js public/service-worker.js",
     "db:seed": "tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup.ts",
     "db:cleanup:dry": "tsx scripts/cleanup.ts --dry-run",
