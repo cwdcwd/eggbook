@@ -133,7 +133,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       });
 
       if (result.count === 0) {
-        throw new Error("NOT_AUTHORIZED");
+        // Distinguish not-found vs not-authorized
+        const exists = await tx.eggListing.findUnique({ where: { id }, select: { id: true } });
+        throw new Error(exists ? "NOT_AUTHORIZED" : "NOT_FOUND");
       }
 
       // Update tags separately (updateMany doesn't support relations)
@@ -158,6 +160,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
   } catch (error) {
     if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
       return NextResponse.json({ error: "Not authorized to edit this listing" }, { status: 403 });
+    }
+    if (error instanceof Error && error.message === "NOT_FOUND") {
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
     console.error("Error updating listing:", error);
     return NextResponse.json({ error: "Failed to update listing" }, { status: 500 });
@@ -218,7 +223,8 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     });
 
     if (result.count === 0) {
-      return NextResponse.json({ error: "Not authorized to delete this listing" }, { status: 403 });
+      // Listing was deleted between check and deleteMany (race) — treat as not found
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });

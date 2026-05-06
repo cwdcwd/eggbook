@@ -2,30 +2,18 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 
 /**
- * Verify admin access using Clerk session claims as source of truth.
- * Falls back to DB role check ONLY when Clerk claims have no explicit role.
- * Once a recognized role claim is present, it's authoritative — DB cannot override.
+ * Verify admin access using Clerk session claims.
+ * Requires an explicit "admin" role claim — no DB fallback.
+ * Consistent with middleware which also blocks without the claim.
  */
 export async function verifyAdmin(): Promise<boolean> {
   const { userId, sessionClaims } = await auth();
   if (!userId) return false;
 
-  // Primary check: Clerk session claims (tamper-proof)
   const metadata = sessionClaims?.metadata as { role?: string } | undefined;
   const clerkRole = metadata?.role;
 
-  // If role claim is present and recognized, it's authoritative
-  if (clerkRole) {
-    return clerkRole.toUpperCase() === "ADMIN";
-  }
-
-  // Fallback: DB role check when no role claim exists (migration period)
-  // This handles both: metadata undefined, metadata empty {}, or role missing
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-    select: { role: true },
-  });
-  return user?.role === "ADMIN";
+  return !!clerkRole && clerkRole.toUpperCase() === "ADMIN";
 }
 
 /**

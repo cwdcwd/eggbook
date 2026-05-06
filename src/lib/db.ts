@@ -58,9 +58,11 @@ export const db = new Proxy({} as PrismaClient, {
 // Guard against duplicate registration during hot reload
 if (typeof process !== 'undefined' && !(global as Record<string, unknown>).__dbShutdownRegistered) {
   (global as Record<string, unknown>).__dbShutdownRegistered = true
-  const shutdown = async () => {
+  const shutdown = () => {
     if (global.pgPool) {
-      await global.pgPool.end()
+      global.pgPool.end().catch((err: unknown) => {
+        console.error('Error closing pg pool:', err)
+      })
       global.pgPool = undefined
     }
   }

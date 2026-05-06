@@ -85,7 +85,7 @@ export async function rateLimit(
         {
           status: 429,
           headers: {
-            "Retry-After": Math.ceil(result.reset / 1000).toString(),
+            "Retry-After": Math.max(0, Math.ceil((result.reset - Date.now()) / 1000)).toString(),
             "X-RateLimit-Limit": result.limit.toString(),
             "X-RateLimit-Remaining": result.remaining.toString(),
           },
