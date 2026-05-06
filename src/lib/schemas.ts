@@ -5,7 +5,11 @@ const cuid = z.string().min(1).max(64);
 const latitude = z.number().min(-90).max(90);
 const longitude = z.number().min(-180).max(180);
 
-// Coerce helper: accepts both number and numeric string
+// Strict numeric regex: rejects trailing chars like "10abc" or decimals for int
+const STRICT_NUMBER_RE = /^-?\d+(\.\d+)?$/;
+const STRICT_INT_RE = /^-?\d+$/;
+
+// Coerce helper: accepts both number and numeric string (strict — rejects "10abc")
 const coerceFinitePositive = (max: number) =>
   z.union([
     z.number().finite().positive().max(max),
@@ -14,7 +18,11 @@ const coerceFinitePositive = (max: number) =>
         ctx.addIssue({ code: "custom", message: "Required" });
         return z.NEVER;
       }
-      const n = parseFloat(v);
+      if (!STRICT_NUMBER_RE.test(v.trim())) {
+        ctx.addIssue({ code: "custom", message: "Must be a valid number" });
+        return z.NEVER;
+      }
+      const n = Number(v);
       if (!Number.isFinite(n) || n <= 0 || n > max) {
         ctx.addIssue({ code: "custom", message: `Must be a positive number up to ${max}` });
         return z.NEVER;
@@ -29,8 +37,12 @@ const coerceIntOptional = (min: number, max: number) =>
     z.number().int().min(min).max(max),
     z.literal("").transform(() => null),
     z.string().transform((v, ctx) => {
-      const n = parseInt(v, 10);
-      if (!Number.isFinite(n) || n < min || n > max) {
+      if (!STRICT_INT_RE.test(v.trim())) {
+        ctx.addIssue({ code: "custom", message: "Must be a valid integer" });
+        return z.NEVER;
+      }
+      const n = Number(v);
+      if (n < min || n > max) {
         ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
         return z.NEVER;
       }
@@ -47,8 +59,12 @@ const coerceInt = (min: number, max: number) =>
         ctx.addIssue({ code: "custom", message: "Required" });
         return z.NEVER;
       }
-      const n = parseInt(v, 10);
-      if (!Number.isFinite(n) || n < min || n > max) {
+      if (!STRICT_INT_RE.test(v.trim())) {
+        ctx.addIssue({ code: "custom", message: "Must be a valid integer" });
+        return z.NEVER;
+      }
+      const n = Number(v);
+      if (n < min || n > max) {
         ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
         return z.NEVER;
       }
