@@ -105,7 +105,7 @@ export const OrderStatusParam = z.enum([
 
 export const SendMessageSchema = z.object({
   conversationId: cuid.optional().nullable(),
-  content: z.string().min(1).max(5000),
+  content: z.string().trim().min(1).max(5000),
   recipientId: cuid.optional().nullable(),
 }).refine(
   (data) => data.conversationId || data.recipientId,
@@ -115,13 +115,13 @@ export const SendMessageSchema = z.object({
 // --- Listings ---
 
 export const CreateListingSchema = z.object({
-  title: z.string().min(1).max(200),
+  title: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional().nullable(),
   pricePerUnit: coerceFinitePositive(100000),
   unit: z.enum(["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"]),
-  customUnitName: z.string().max(100).optional().nullable(),
+  customUnitName: z.string().trim().max(100).optional().nullable(),
   customUnitQty: coerceIntOptional(1, 10000).optional().nullable(),
-  stockCount: coerceInt(0, 100000).optional(),
+  stockCount: coerceIntOptional(0, 100000).optional().nullable(),
   photos: z.array(z.string().url().max(2048)).max(10).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
 }).refine(
@@ -148,7 +148,7 @@ export const CheckoutSchema = z.object({
 // --- Settings ---
 
 export const UpdateSettingsSchema = z.object({
-  displayName: z.string().min(1).max(100),
+  displayName: z.string().trim().min(1).max(100),
   bio: z.string().max(1000).optional().nullable(),
   avatarUrl: z.string().url().max(2048).optional().nullable(),
   address: z.string().max(200).optional().nullable(),
@@ -159,7 +159,11 @@ export const UpdateSettingsSchema = z.object({
     z.number().finite().min(0).max(500),
     z.string().transform((v, ctx) => {
       if (!v || v.trim() === "") return null;
-      const n = parseFloat(v);
+      if (!STRICT_NUMBER_RE.test(v.trim())) {
+        ctx.addIssue({ code: "custom", message: "Must be a valid number" });
+        return z.NEVER;
+      }
+      const n = Number(v);
       if (!Number.isFinite(n) || n < 0 || n > 500) {
         ctx.addIssue({ code: "custom", message: "Must be a number between 0 and 500" });
         return z.NEVER;
@@ -197,4 +201,9 @@ export const AdminOrderStatusSchema = z.object({
 export const AdminUserActionSchema = z.object({
   action: z.enum(["suspend", "unsuspend", "change_role"]),
   role: z.enum(["BUYER", "SELLER"]).optional(),
+});
+
+export const AdminRefundSchema = z.object({
+  amount: z.number().positive().max(100000).optional(),
+  reason: z.string().max(500).optional(),
 });
