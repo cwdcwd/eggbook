@@ -36,19 +36,19 @@ export async function GET(req: NextRequest) {
     
     // Extract query parameters with validation
     const q = (searchParams.get("q") || "").slice(0, 200);
-    const rawLat = searchParams.get("lat") ? parseFloat(searchParams.get("lat")!) : null;
-    const rawLng = searchParams.get("lng") ? parseFloat(searchParams.get("lng")!) : null;
+    const rawLat = searchParams.get("lat") ? Number(searchParams.get("lat")) : null;
+    const rawLng = searchParams.get("lng") ? Number(searchParams.get("lng")) : null;
     const lat = rawLat !== null && Number.isFinite(rawLat) && rawLat >= -90 && rawLat <= 90 ? rawLat : null;
     const lng = rawLng !== null && Number.isFinite(rawLng) && rawLng >= -180 && rawLng <= 180 ? rawLng : null;
     const tags = searchParams.get("tags")?.split(",").filter(Boolean).slice(0, 20) || [];
-    const rawMinPrice = searchParams.get("minPrice") ? parseFloat(searchParams.get("minPrice")!) : null;
-    const rawMaxPrice = searchParams.get("maxPrice") ? parseFloat(searchParams.get("maxPrice")!) : null;
+    const rawMinPrice = searchParams.get("minPrice") ? Number(searchParams.get("minPrice")) : null;
+    const rawMaxPrice = searchParams.get("maxPrice") ? Number(searchParams.get("maxPrice")) : null;
     const minPrice = rawMinPrice !== null && Number.isFinite(rawMinPrice) && rawMinPrice >= 0 ? rawMinPrice : null;
     const maxPrice = rawMaxPrice !== null && Number.isFinite(rawMaxPrice) && rawMaxPrice >= 0 ? rawMaxPrice : null;
     const delivery = searchParams.get("delivery") === "true";
     const sort = searchParams.get("sort") || "relevance";
-    const rawLimit = parseInt(searchParams.get("limit") || "50");
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, MAX_LIMIT) : 50;
+    const rawLimit = Number(searchParams.get("limit") || "50");
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), MAX_LIMIT) : 50;
 
     // Build the where clause for sellers
     const sellerWhere: any = {
