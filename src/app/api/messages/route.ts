@@ -25,9 +25,10 @@ export async function POST(req: NextRequest) {
     let conversation;
 
     if (conversationId) {
-      // Use existing conversation
+      // Use existing conversation (include buyer/seller for push notification clerkId)
       conversation = await db.conversation.findUnique({
         where: { id: conversationId },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
             { buyerId: recipientId, sellerId: user.id },
           ],
         },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -68,6 +70,7 @@ export async function POST(req: NextRequest) {
             buyerId: isBuyer ? user.id : recipientId,
             sellerId: isBuyer ? recipientId : user.id,
           },
+          include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
         });
       }
     } else {
@@ -117,18 +120,15 @@ export async function POST(req: NextRequest) {
       senderUsername: user.username,
     });
 
-    // Push notification via Beams (need recipient's clerkId)
-    const recipient = await db.user.findUnique({
-      where: { id: recipientUserId },
-      select: { clerkId: true },
+    // Push notification via Beams (clerkId included from conversation query)
+    const recipientClerkId = conversation.buyerId === user.id
+      ? conversation.seller.clerkId
+      : conversation.buyer.clerkId;
+    notifyUser(recipientClerkId, {
+      title: `New message from ${user.username}`,
+      body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+      deepLink: `/dashboard/messages`,
     });
-    if (recipient) {
-      notifyUser(recipient.clerkId, {
-        title: `New message from ${user.username}`,
-        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
-        deepLink: `/dashboard/messages`,
-      });
-    }
 
     return NextResponse.json(message);
   } catch (error) {

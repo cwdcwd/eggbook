@@ -39,10 +39,10 @@ async function getBeamsClient(): Promise<PusherPushNotifications.Client | null> 
  * Call this after the user logs in.
  */
 export async function startBeams(userId: string): Promise<void> {
-  const client = await getBeamsClient();
-  if (!client) return;
-
   try {
+    const client = await getBeamsClient();
+    if (!client) return;
+
     const tokenProvider = new PusherPushNotifications.TokenProvider({
       url: "/api/beams/auth",
     });
@@ -62,7 +62,7 @@ export async function startBeams(userId: string): Promise<void> {
     await client.setUserId(userId, tokenProvider);
     console.log("[beams] Successfully registered for push notifications");
   } catch (err) {
-    // Don't break the app if notifications fail
+    // Don't break the app if notifications fail (including SW registration failures)
     console.error("[beams] Failed to start:", err);
   }
 }

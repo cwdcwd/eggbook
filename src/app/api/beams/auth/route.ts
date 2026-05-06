@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   // Validate the user_id query param matches the authenticated user
   const requestedUserId = req.nextUrl.searchParams.get("user_id");
   if (requestedUserId && requestedUserId !== userId) {
-    return NextResponse.json({ error: "Inconsistent request" }, { status: 401 });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const beamsToken = generateBeamsToken(userId);
