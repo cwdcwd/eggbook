@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { createRefund } from "@/lib/stripe";
 import { verifyAdmin } from "@/lib/auth";
 import { AdminRefundSchema } from "@/lib/schemas";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -67,22 +68,34 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // Issue refund via Stripe
     const refund = await createRefund(order.stripePaymentId, refundAmountCents);
 
-    // Update order status
-    await db.order.update({
-      where: { id },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancelReason: reason || "Refund issued by admin",
-      },
-    });
+    // Update order status, restore stock, and log audit trail in one transaction
+    const cancelReason = reason || "Refund issued by admin";
+    await db.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelReason,
+        },
+      });
 
-    // Restore stock
-    await db.eggListing.update({
-      where: { id: order.listingId },
-      data: {
-        stockCount: { increment: order.quantity },
-      },
+      await tx.eggListing.update({
+        where: { id: order.listingId },
+        data: {
+          stockCount: { increment: order.quantity },
+        },
+      });
+
+      await logOrderStatusChange({
+        orderId: id,
+        fromStatus: order.status,
+        toStatus: "CANCELLED",
+        changedBy: userId,
+        changedByType: "ADMIN",
+        reason: cancelReason,
+        tx,
+      });
     });
 
     return NextResponse.json({
