@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
@@ -123,11 +123,13 @@ export async function POST(req: NextRequest) {
       totalPrice,
     });
 
-    // Push notification via Beams
-    await notifyUser(listing.seller.user.clerkId, {
-      title: "New Order",
-      body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
-      deepLink: `/dashboard/orders`,
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(listing.seller.user.clerkId, {
+        title: "New Order",
+        body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
+        deepLink: `/dashboard/orders`,
+      });
     });
 
     return NextResponse.json(order);

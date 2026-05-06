@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
@@ -124,10 +124,13 @@ export async function POST(req: NextRequest) {
     const recipientClerkId = conversation.buyerId === user.id
       ? conversation.seller.clerkId
       : conversation.buyer.clerkId;
-    await notifyUser(recipientClerkId, {
-      title: `New message from ${user.username}`,
-      body: content.length > 100 ? content.slice(0, 100) + "..." : content,
-      deepLink: `/dashboard/messages`,
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(recipientClerkId, {
+        title: `New message from ${user.username}`,
+        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+        deepLink: `/dashboard/messages`,
+      });
     });
 
     return NextResponse.json(message);

@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { after } from "next/server";
 import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
@@ -137,11 +138,13 @@ export async function POST(req: Request) {
             });
           }
 
-          // Notify seller that payment was received
-          await notifyUser(order.seller.user.clerkId, {
-            title: "Payment Received",
-            body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
-            deepLink: `/dashboard/orders`,
+          // Notify seller that payment was received (runs after response)
+          after(async () => {
+            await notifyUser(order.seller.user.clerkId, {
+              title: "Payment Received",
+              body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
+              deepLink: `/dashboard/orders`,
+            });
           });
         }
       }

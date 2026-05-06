@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
@@ -201,20 +201,22 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       }),
     ]);
 
-    // Push notifications via Beams (fire-and-forget)
+    // Push notifications via Beams (runs after response is sent)
     const statusLabel = updatedOrder.status.charAt(0) + updatedOrder.status.slice(1).toLowerCase();
-    await Promise.all([
-      notifyUser(buyerUserId, {
-        title: `Order ${statusLabel}`,
-        body: `Your order #${updatedOrder.id.slice(-6)} has been ${statusLabel.toLowerCase()}`,
-        deepLink: `/dashboard/orders`,
-      }),
-      notifyUser(sellerUserId, {
-        title: `Order ${statusLabel}`,
-        body: `Order #${updatedOrder.id.slice(-6)} is now ${statusLabel.toLowerCase()}`,
-        deepLink: `/dashboard/orders`,
-      }),
-    ]);
+    after(async () => {
+      await Promise.all([
+        notifyUser(buyerUserId, {
+          title: `Order ${statusLabel}`,
+          body: `Your order #${updatedOrder.id.slice(-6)} has been ${statusLabel.toLowerCase()}`,
+          deepLink: `/dashboard/orders`,
+        }),
+        notifyUser(sellerUserId, {
+          title: `Order ${statusLabel}`,
+          body: `Order #${updatedOrder.id.slice(-6)} is now ${statusLabel.toLowerCase()}`,
+          deepLink: `/dashboard/orders`,
+        }),
+      ]);
+    });
 
     return NextResponse.json(updatedOrder);
   } catch (error) {
