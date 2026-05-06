@@ -10,6 +10,10 @@ const coerceFinitePositive = (max: number) =>
   z.union([
     z.number().finite().positive().max(max),
     z.string().transform((v, ctx) => {
+      if (!v.trim()) {
+        ctx.addIssue({ code: "custom", message: "Required" });
+        return z.NEVER;
+      }
       const n = parseFloat(v);
       if (!Number.isFinite(n) || n <= 0 || n > max) {
         ctx.addIssue({ code: "custom", message: `Must be a positive number up to ${max}` });
@@ -19,10 +23,30 @@ const coerceFinitePositive = (max: number) =>
     }),
   ]);
 
+// Coerce helper for optional int fields — empty string treated as null
+const coerceIntOptional = (min: number, max: number) =>
+  z.union([
+    z.number().int().min(min).max(max),
+    z.literal("").transform(() => null),
+    z.string().transform((v, ctx) => {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n < min || n > max) {
+        ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
+        return z.NEVER;
+      }
+      return n;
+    }),
+  ]);
+
+// Coerce helper for required int fields — empty string is an error
 const coerceInt = (min: number, max: number) =>
   z.union([
     z.number().int().min(min).max(max),
     z.string().transform((v, ctx) => {
+      if (!v.trim()) {
+        ctx.addIssue({ code: "custom", message: "Required" });
+        return z.NEVER;
+      }
       const n = parseInt(v, 10);
       if (!Number.isFinite(n) || n < min || n > max) {
         ctx.addIssue({ code: "custom", message: `Must be an integer between ${min} and ${max}` });
@@ -80,7 +104,7 @@ export const CreateListingSchema = z.object({
   pricePerUnit: coerceFinitePositive(100000),
   unit: z.enum(["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"]),
   customUnitName: z.string().max(100).optional().nullable(),
-  customUnitQty: coerceInt(1, 10000).optional().nullable(),
+  customUnitQty: coerceIntOptional(1, 10000).optional().nullable(),
   stockCount: coerceInt(0, 100000).optional(),
   photos: z.array(z.string().url().max(2048)).max(10).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
