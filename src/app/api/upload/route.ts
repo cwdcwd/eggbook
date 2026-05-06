@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,6 +9,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "upload");
+    if (!rl.success) return rl.response;
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -34,9 +38,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Generate unique filename
+    // Generate unique filename (derive extension from validated MIME type, not user filename)
+    const mimeToExt: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+      "image/gif": "gif",
+    };
     const timestamp = Date.now();
-    const extension = file.name.split(".").pop();
+    const extension = mimeToExt[file.type] || "jpg";
     const filename = `${userId}/${timestamp}.${extension}`;
 
     // Upload to Vercel Blob

@@ -7,6 +7,8 @@ import { triggerNewOrder } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { CreateOrderSchema, OrderStatusParam } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -16,8 +18,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
+
     const body = await req.json();
-    const { listingId, quantity, fulfillmentType, pickupTime, deliveryAddress, deliveryLat, deliveryLng } = body;
+    const parsed = CreateOrderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { listingId, quantity, fulfillmentType, pickupTime, deliveryAddress, deliveryLat, deliveryLng } = parsed.data;
 
     // Get the listing
     const listing = await db.eggListing.findUnique({
@@ -178,10 +187,22 @@ export async function GET(req: NextRequest) {
         return { status: { in: uncompletedStatuses } };
       }
       if (status) {
-        return { status: status as OrderStatus };
+        const parsed = OrderStatusParam.safeParse(status);
+        if (!parsed.success) {
+          return null; // Signal invalid status
+        }
+        return { status: parsed.data as OrderStatus };
       }
       return {};
     };
+
+    const statusFilter = getStatusFilter();
+    if (statusFilter === null) {
+      return NextResponse.json(
+        { error: "Invalid status parameter" },
+        { status: 400 }
+      );
+    }
 
     let orders;
 
@@ -189,7 +210,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           sellerId: user.sellerProfile.id,
-          ...getStatusFilter(),
+          ...statusFilter,
         },
         include: {
           listing: true,
@@ -201,7 +222,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           buyerId: user.id,
-          ...getStatusFilter(),
+          ...statusFilter,
         },
         include: {
           listing: true,

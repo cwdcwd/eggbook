@@ -2,6 +2,21 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 
 /**
+ * Verify admin access using Clerk session claims.
+ * Requires an explicit "admin" role claim — no DB fallback.
+ * Consistent with middleware which also blocks without the claim.
+ */
+export async function verifyAdmin(): Promise<boolean> {
+  const { userId, sessionClaims } = await auth();
+  if (!userId) return false;
+
+  const metadata = sessionClaims?.metadata as { role?: string } | undefined;
+  const clerkRole = metadata?.role;
+
+  return !!clerkRole && clerkRole.toUpperCase() === "ADMIN";
+}
+
+/**
  * Get user from database, or create from Clerk data if not exists.
  * Handles the case where Clerk webhook hasn't synced the user yet.
  */
@@ -61,14 +76,6 @@ export async function requireSeller() {
   const user = await getCurrentUser()
   if (!user || user.role !== 'SELLER') {
     throw new Error('Seller access required')
-  }
-  return user
-}
-
-export async function requireAdmin() {
-  const user = await getCurrentUser()
-  if (!user || user.role !== 'ADMIN') {
-    throw new Error('Admin access required')
   }
   return user
 }

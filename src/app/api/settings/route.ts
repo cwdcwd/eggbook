@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { PickupType, PaymentMethod } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
+import { UpdateSettingsSchema } from "@/lib/schemas";
 
 // Allowed URL patterns for avatar sync (SSRF protection)
 const ALLOWED_AVATAR_PATTERNS = [
@@ -81,6 +83,10 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = UpdateSettingsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       displayName,
       bio,
@@ -93,34 +99,33 @@ export async function PUT(req: NextRequest) {
       pickupType,
       paymentMethod,
       autoAcceptOrders,
-    } = body;
+    } = parsed.data;
 
-    // Validate required fields
-    if (!displayName || displayName.trim() === "") {
-      return NextResponse.json({ error: "Display name is required" }, { status: 400 });
-    }
-
-    // Parse maxDeliveryDistance
-    const maxDeliveryDistanceFloat = maxDeliveryDistance
-      ? parseFloat(maxDeliveryDistance)
+    // Only include maxDeliveryDistance in update if it was explicitly provided
+    const hasMaxDeliveryDistance = maxDeliveryDistance !== undefined;
+    const maxDeliveryDistanceFloat = typeof maxDeliveryDistance === 'number'
+      ? maxDeliveryDistance
       : null;
+
+    // Build update data — only include optional fields if explicitly provided
+    const updateData: Record<string, unknown> = {
+      displayName: displayName.trim(),
+    };
+    if (bio !== undefined) updateData.bio = bio?.trim() || null;
+    if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl || null;
+    if (address !== undefined) updateData.address = address?.trim() || null;
+    if (city !== undefined) updateData.city = city?.trim() || null;
+    if (state !== undefined) updateData.state = state?.trim() || null;
+    if (zip !== undefined) updateData.zip = zip?.trim() || null;
+    if (hasMaxDeliveryDistance) updateData.maxDeliveryDistance = maxDeliveryDistanceFloat;
+    if (pickupType !== undefined) updateData.pickupType = pickupType as PickupType;
+    if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod as PaymentMethod;
+    if (autoAcceptOrders !== undefined) updateData.autoAcceptOrders = autoAcceptOrders;
 
     // Upsert seller profile (create if doesn't exist)
     const sellerProfile = await db.sellerProfile.upsert({
       where: { userId: user.id },
-      update: {
-        displayName: displayName.trim(),
-        bio: bio?.trim() || null,
-        avatarUrl: avatarUrl || null,
-        address: address?.trim() || null,
-        city: city?.trim() || null,
-        state: state?.trim() || null,
-        zip: zip?.trim() || null,
-        maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
-        autoAcceptOrders: autoAcceptOrders ?? true,
-      },
+      update: updateData,
       create: {
         userId: user.id,
         displayName: displayName.trim(),
@@ -131,8 +136,8 @@ export async function PUT(req: NextRequest) {
         state: state?.trim() || null,
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
+        pickupType: (pickupType || "ARRANGED") as PickupType,
+        paymentMethod: (paymentMethod || "PLATFORM") as PaymentMethod,
         autoAcceptOrders: autoAcceptOrders ?? true,
       },
     });

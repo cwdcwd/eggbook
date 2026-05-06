@@ -5,6 +5,7 @@ import { OrderStatus } from "@prisma/client";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { triggerOrderUpdate } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
+import { OrderActionSchema } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -95,7 +96,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json();
-    const { action, cancelReason } = body;
+    const parsed = OrderActionSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { action, cancelReason } = parsed.data;
 
     const isBuyer = order.buyerId === user.id;
     const isSeller = user.sellerProfile?.id === order.sellerId;

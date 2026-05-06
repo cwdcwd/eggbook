@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
+import { UpdateListingSchema } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -83,6 +84,10 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json();
+    const parsed = UpdateListingSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       title,
       description,
@@ -94,22 +99,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       photos,
       tags,
       isAvailable,
-    } = body;
-
-    // Validate required fields
-    if (!title || title.trim() === "") {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
-
-    if (!pricePerUnit || pricePerUnit <= 0) {
-      return NextResponse.json({ error: "Valid price is required" }, { status: 400 });
-    }
-
-    // Validate unit
-    const validUnits: PricingUnit[] = ["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"];
-    if (!validUnits.includes(unit as PricingUnit)) {
-      return NextResponse.json({ error: "Invalid pricing unit" }, { status: 400 });
-    }
+    } = parsed.data;
 
     // Handle tags - connect existing or create new ones
     const tagConnections = await Promise.all(
@@ -124,31 +114,56 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       })
     );
 
-    // Update listing
-    const listing = await db.eggListing.update({
-      where: { id },
-      data: {
-        title: title.trim(),
-        description: description?.trim() || null,
-        pricePerUnit: parseFloat(pricePerUnit),
-        unit: unit as PricingUnit,
-        customUnitName: unit === "CUSTOM" ? customUnitName : null,
-        customUnitQty: unit === "CUSTOM" ? parseInt(customUnitQty) : null,
-        stockCount: parseInt(stockCount) || 0,
-        photos: photos || [],
-        isAvailable: isAvailable !== undefined ? isAvailable : existingListing.isAvailable,
-        tags: {
-          set: [], // Disconnect all existing tags
-          connect: tagConnections, // Connect new tags
+    // Update listing atomically with ownership check (updateMany supports non-unique where)
+    const sellerId = user.sellerProfile!.id;
+    const [updated] = await db.$transaction(async (tx) => {
+      const result = await tx.eggListing.updateMany({
+        where: { id, sellerId },
+        data: {
+          title: title.trim(),
+          description: description?.trim() || null,
+          pricePerUnit,
+          unit: unit as PricingUnit,
+          customUnitName: unit === "CUSTOM" ? customUnitName ?? null : null,
+          customUnitQty: unit === "CUSTOM" ? customUnitQty ?? null : null,
+          stockCount: stockCount || 0,
+          photos: photos || [],
+          isAvailable: isAvailable !== undefined ? isAvailable : existingListing.isAvailable,
         },
-      },
-      include: {
-        tags: true,
-      },
+      });
+
+      if (result.count === 0) {
+        // Distinguish not-found vs not-authorized
+        const exists = await tx.eggListing.findUnique({ where: { id }, select: { id: true } });
+        throw new Error(exists ? "NOT_AUTHORIZED" : "NOT_FOUND");
+      }
+
+      // Update tags separately (updateMany doesn't support relations)
+      await tx.eggListing.update({
+        where: { id },
+        data: {
+          tags: {
+            set: [],
+            connect: tagConnections,
+          },
+        },
+      });
+
+      return [await tx.eggListing.findUnique({ where: { id }, include: { tags: true } })];
     });
 
-    return NextResponse.json(listing);
+    if (!updated) {
+      return NextResponse.json({ error: "Listing not found after update" }, { status: 404 });
+    }
+
+    return NextResponse.json(updated);
   } catch (error) {
+    if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
+      return NextResponse.json({ error: "Not authorized to edit this listing" }, { status: 403 });
+    }
+    if (error instanceof Error && error.message === "NOT_FOUND") {
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
     console.error("Error updating listing:", error);
     return NextResponse.json({ error: "Failed to update listing" }, { status: 500 });
   }
@@ -202,10 +217,15 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Delete listing
-    await db.eggListing.delete({
-      where: { id },
+    // Delete listing with atomic ownership check
+    const result = await db.eggListing.deleteMany({
+      where: { id, sellerId: user.sellerProfile.id },
     });
+
+    if (result.count === 0) {
+      // Listing was deleted between check and deleteMany (race) — treat as not found
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

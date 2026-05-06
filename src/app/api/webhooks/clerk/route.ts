@@ -2,6 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   handleSubscriptionActivation,
   handleSubscriptionUpdate,
@@ -9,14 +10,19 @@ import {
 } from "@/lib/subscription";
 
 export async function POST(req: Request) {
+  // Rate limit by IP
+  const headerPayload = await headers();
+  const ip = headerPayload.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
+  const rl = await rateLimit(ip, "webhook");
+  if (!rl.success) return rl.response;
+
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
   if (!WEBHOOK_SECRET) {
     throw new Error("Please add CLERK_WEBHOOK_SECRET to .env");
   }
 
-  // Get headers
-  const headerPayload = await headers();
+  // Get svix headers for verification
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
@@ -25,9 +31,8 @@ export async function POST(req: Request) {
     return new Response("Error: Missing svix headers", { status: 400 });
   }
 
-  // Get body
-  const payload = await req.json();
-  const body = JSON.stringify(payload);
+  // Get body as raw text for accurate signature verification
+  const body = await req.text();
 
   // Verify webhook
   const wh = new Webhook(WEBHOOK_SECRET);
