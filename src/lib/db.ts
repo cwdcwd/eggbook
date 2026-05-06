@@ -55,7 +55,9 @@ export const db = new Proxy({} as PrismaClient, {
 })
 
 // Graceful shutdown — close pool on process termination
-if (typeof process !== 'undefined') {
+// Guard against duplicate registration during hot reload
+if (typeof process !== 'undefined' && !(global as Record<string, unknown>).__dbShutdownRegistered) {
+  (global as Record<string, unknown>).__dbShutdownRegistered = true
   const shutdown = async () => {
     if (global.pgPool) {
       await global.pgPool.end()

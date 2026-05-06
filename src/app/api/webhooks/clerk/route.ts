@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   const headerPayload = await headers();
   const ip = headerPayload.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const rl = await rateLimit(ip, "webhook");
-  if (!rl.success) return new Response("Too many requests", { status: 429 });
+  if (!rl.success) return rl.response;
 
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 

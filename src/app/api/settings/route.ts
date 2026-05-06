@@ -101,7 +101,8 @@ export async function PUT(req: NextRequest) {
       autoAcceptOrders,
     } = parsed.data;
 
-    // Parse maxDeliveryDistance
+    // Only include maxDeliveryDistance in update if it was explicitly provided
+    const hasMaxDeliveryDistance = maxDeliveryDistance !== undefined;
     const maxDeliveryDistanceFloat = typeof maxDeliveryDistance === 'number'
       ? maxDeliveryDistance
       : null;
@@ -117,7 +118,7 @@ export async function PUT(req: NextRequest) {
         city: city?.trim() || null,
         state: state?.trim() || null,
         zip: zip?.trim() || null,
-        maxDeliveryDistance: maxDeliveryDistanceFloat,
+        ...(hasMaxDeliveryDistance && { maxDeliveryDistance: maxDeliveryDistanceFloat }),
         pickupType: (pickupType || "ARRANGED") as PickupType,
         paymentMethod: (paymentMethod || "PLATFORM") as PaymentMethod,
         autoAcceptOrders: autoAcceptOrders ?? true,

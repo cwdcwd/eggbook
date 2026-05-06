@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   const headersList = await headers();
   const ip = headersList.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const rl = await rateLimit(ip, "webhook");
-  if (!rl.success) return new Response("Too many requests", { status: 429 });
+  if (!rl.success) return rl.response;
 
   const body = await req.text();
   const signature = headersList.get("stripe-signature");

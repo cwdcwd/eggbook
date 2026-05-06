@@ -150,6 +150,10 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return [await tx.eggListing.findUnique({ where: { id }, include: { tags: true } })];
     });
 
+    if (!updated) {
+      return NextResponse.json({ error: "Listing not found after update" }, { status: 404 });
+    }
+
     return NextResponse.json(updated);
   } catch (error) {
     if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
