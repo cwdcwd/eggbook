@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { Badge, Card, Button } from "@/components/ui";
 import { formatPrice, formatDate, formatRelativeTime } from "@/lib/utils";
 import { Check, X, MessageSquare, Eye, Loader2, History, ChevronDown } from "lucide-react";
+import { usePusherRefresh } from "@/hooks/usePusherRefresh";
 
 const STATUS_BADGES: Record<string, { variant: "default" | "success" | "warning" | "error" | "info"; label: string }> = {
   PENDING: { variant: "warning", label: "Pending" },
@@ -107,6 +109,9 @@ export default function OrdersPage() {
       setIsLoading(false);
     }
   }, [filter, viewRole, hasSeller]);
+
+  // Real-time: refetch orders when new order or order status update arrives
+  usePusherRefresh(["new-order", "order-update"], fetchOrders);
 
   const fetchOrderHistory = useCallback(async (orderId: string) => {
     setHistoryLoading(true);

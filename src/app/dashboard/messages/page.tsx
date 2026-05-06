@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import { Send, ArrowLeft, User, Loader2 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
@@ -31,6 +31,7 @@ interface Conversation {
 
 function MessagesPageContent() {
   const { user } = useUser();
+  const { userId: clerkUserId } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const orderId = searchParams.get("order");
@@ -41,6 +42,7 @@ function MessagesPageContent() {
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isStartingConversation, setIsStartingConversation] = useState(false);
+  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const orderProcessedRef = useRef<string | null>(null);
 
@@ -113,28 +115,50 @@ function MessagesPageContent() {
   }, [router]);
 
   // Fetch conversations
-  useEffect(() => {
-    async function fetchConversations() {
-      try {
-        const res = await fetch("/api/messages");
-        if (!res.ok) {
-          console.error("Failed to fetch conversations:", res.status);
-          setConversations([]);
-          return;
-        }
-        const data = await res.json();
-        const convos = data.conversations || data;
-        setConversations(Array.isArray(convos) ? convos : []);
-      } catch (error) {
-        console.error("Error fetching conversations:", error);
+  const fetchConversations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/messages");
+      if (!res.ok) {
+        console.error("Failed to fetch conversations:", res.status);
         setConversations([]);
-      } finally {
-        setIsLoading(false);
+        return;
       }
+      const data = await res.json();
+      const convos = data.conversations || data;
+      setConversations(Array.isArray(convos) ? convos : []);
+      if (data.userId) {
+        setDbUserId(data.userId);
+      }
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+      setConversations([]);
+    } finally {
+      setIsLoading(false);
     }
-
-    fetchConversations();
   }, []);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+
+  // Real-time: refresh conversation list when a new message arrives (for any conversation)
+  useEffect(() => {
+    if (!dbUserId) return;
+
+    const pusher = getPusherClient();
+    if (!pusher) return;
+
+    const channel = pusher.subscribe(CHANNELS.user(dbUserId));
+
+    channel.bind(EVENTS.USER_NEW_MESSAGE, () => {
+      fetchConversations();
+    });
+
+    return () => {
+      channel.unbind(EVENTS.USER_NEW_MESSAGE);
+      pusher.unsubscribe(CHANNELS.user(dbUserId));
+    };
+  }, [dbUserId, fetchConversations]);
 
   // Handle order parameter to start conversation
   useEffect(() => {

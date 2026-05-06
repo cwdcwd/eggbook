@@ -1,7 +1,4 @@
 import PushNotifications from "@pusher/push-notifications-server";
-import * as jwt from "jsonwebtoken";
-
-const HEX_REGEX = /^[0-9a-fA-F]+$/;
 
 const isBeamsConfigured = !!(
   process.env.NEXT_PUBLIC_BEAMS_INSTANCE_ID &&
@@ -50,35 +47,20 @@ function sanitizeDeepLink(deepLink: string | undefined): string | undefined {
 
 /**
  * Generate a Beams token for authenticating a user's device.
- * Uses hex-decoded secret key for correct JWT signature.
+ * Uses the official SDK's generateToken method for correct signature.
  * Returns { token } on success, or { error, code } on failure.
  */
 export function generateBeamsToken(userId: string):
   | { token: string }
   | { error: string; code: "NOT_CONFIGURED" | "INVALID_KEY" }
 {
-  if (!isBeamsConfigured) {
+  const beams = getBeamsServer();
+  if (!beams) {
     return { error: "Beams is not configured", code: "NOT_CONFIGURED" };
   }
 
-  const instanceId = process.env.NEXT_PUBLIC_BEAMS_INSTANCE_ID!;
-  const rawKey = process.env.BEAMS_SECRET_KEY!;
-
-  if (!HEX_REGEX.test(rawKey) || rawKey.length % 2 !== 0) {
-    console.error("[beams-server] BEAMS_SECRET_KEY is not valid hex (must be even-length hex string)");
-    return { error: "Beams secret key is misconfigured", code: "INVALID_KEY" as const };
-  }
-
-  const secretKey = Buffer.from(rawKey, "hex");
-
-  const token = jwt.sign({}, secretKey, {
-    algorithm: "HS256",
-    expiresIn: "24h",
-    issuer: `https://${instanceId}.pushnotifications.pusher.com`,
-    subject: userId,
-  });
-
-  return { token };
+  const beamsToken = beams.generateToken(userId);
+  return { token: beamsToken.token };
 }
 
 /**

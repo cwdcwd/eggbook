@@ -43,6 +43,18 @@ export async function startBeams(userId: string): Promise<void> {
     const client = await getBeamsClient();
     if (!client) return;
 
+    // Preflight: verify the auth endpoint can generate a valid token
+    // before handing off to the Pusher SDK (avoids cryptic 401 from Pusher servers)
+    const preflightRes = await fetch(`/api/beams/auth?user_id=${encodeURIComponent(userId)}`);
+    if (!preflightRes.ok) {
+      const body = await preflightRes.json().catch(() => ({}));
+      console.warn(
+        `[beams] Auth endpoint returned ${preflightRes.status} — skipping push registration.`,
+        body.error || ""
+      );
+      return;
+    }
+
     const tokenProvider = new PusherPushNotifications.TokenProvider({
       url: "/api/beams/auth",
     });
@@ -63,7 +75,7 @@ export async function startBeams(userId: string): Promise<void> {
     console.log("[beams] Successfully registered for push notifications");
   } catch (err) {
     // Don't break the app if notifications fail (including SW registration failures)
-    console.error("[beams] Failed to start:", err);
+    console.warn("[beams] Push notification setup failed (non-critical):", (err as Error).message || err);
   }
 }
 
