@@ -103,8 +103,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // Restore stock when transitioning to terminal cancelled/declined status
-      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId) {
+      // Restore stock only when transitioning FROM a non-terminal status
+      const terminalStatuses = ["CANCELLED", "DECLINED"];
+      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !terminalStatuses.includes(current.status)) {
         await tx.eggListing.update({
           where: { id: order.listingId },
           data: { stockCount: { increment: order.quantity } },
