@@ -103,9 +103,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // Restore stock only when transitioning FROM a non-terminal status
-      const terminalStatuses = ["CANCELLED", "DECLINED"];
-      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !terminalStatuses.includes(current.status)) {
+      // Restore stock only when transitioning FROM a non-terminal/non-fulfilled status
+      const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
+      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !noRestoreStatuses.includes(current.status)) {
         await tx.eggListing.update({
           where: { id: order.listingId },
           data: { stockCount: { increment: order.quantity } },

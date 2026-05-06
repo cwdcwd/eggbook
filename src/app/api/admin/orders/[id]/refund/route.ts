@@ -80,12 +80,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      await tx.eggListing.update({
-        where: { id: order.listingId },
-        data: {
-          stockCount: { increment: order.quantity },
-        },
-      });
+      // Only restore stock if order wasn't already fulfilled
+      if (order.status !== "COMPLETED") {
+        await tx.eggListing.update({
+          where: { id: order.listingId },
+          data: {
+            stockCount: { increment: order.quantity },
+          },
+        });
+      }
 
       await logOrderStatusChange({
         orderId: id,
