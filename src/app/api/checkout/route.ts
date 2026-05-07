@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       amountInCents,
       sellerAccount,
       platformFeeInCents,
-      `${baseUrl}/checkout/${order.id}/success`,
+      `${baseUrl}/checkout/${order.id}/success?session_id={CHECKOUT_SESSION_ID}`,
       `${baseUrl}/checkout/${order.id}`
     );
 
