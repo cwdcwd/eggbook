@@ -79,6 +79,8 @@ function SellerCard({ seller, onFavorite, isFavorite }: { seller: Seller; onFavo
                 e.stopPropagation();
                 onFavorite(seller.id);
               }}
+              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFavorite}
               className={cn(
                 "absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
                 isFavorite 
@@ -215,6 +217,8 @@ function SellerListItem({ seller, onFavorite, isFavorite }: { seller: Seller; on
                       e.stopPropagation();
                       onFavorite(seller.id);
                     }}
+                    aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                    aria-pressed={isFavorite}
                     className={cn(
                       "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
                       isFavorite 

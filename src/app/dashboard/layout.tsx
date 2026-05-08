@@ -265,6 +265,7 @@ export default function DashboardLayout({
               onClick={toggleCollapsed}
               className="absolute -right-3 top-8 w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-md hover:bg-amber-600 transition-colors z-10"
               title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {isCollapsed ? (
                 <ChevronRight className="w-4 h-4" />
