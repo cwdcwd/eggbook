@@ -193,16 +193,25 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const buyerUserId = updatedOrder.buyer.clerkId;
     const sellerUserId = updatedOrder.seller.user.clerkId;
 
+    const actionLabels: Record<string, string> = {
+      confirm: "confirmed",
+      decline: "declined",
+      cancel: "cancelled",
+      complete: "completed",
+      markPaid: "marked as paid",
+    };
+    const actionLabel = actionLabels[action] || updatedOrder.status.toLowerCase();
+
     await Promise.all([
       triggerOrderUpdate(buyerUserId, {
         orderId: updatedOrder.id,
         status: updatedOrder.status,
-        message: `Order ${action}ed`,
+        message: `Order ${actionLabel}`,
       }),
       triggerOrderUpdate(sellerUserId, {
         orderId: updatedOrder.id,
         status: updatedOrder.status,
-        message: `Order ${action}ed`,
+        message: `Order ${actionLabel}`,
       }),
     ]);
 

@@ -80,6 +80,7 @@ export async function GET(req: NextRequest) {
                 { tags: { some: { name: { contains: q, mode: "insensitive" } } } },
               ],
               isAvailable: true,
+              hiddenBySubscription: false,
             },
           },
         },

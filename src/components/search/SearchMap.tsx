@@ -5,6 +5,15 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatPrice } from "@/lib/utils";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 interface Seller {
   id: string;
   displayName: string;
@@ -147,12 +156,12 @@ export function SearchMap({ sellers, userLocation, onSellerClick, className }: S
 
         const popupContent = `
           <div style="min-width: 180px;">
-            <h3 style="font-weight: 600; margin-bottom: 4px;">${seller.displayName}</h3>
-            <p style="color: #78716c; font-size: 12px; margin-bottom: 4px;">@${seller.user.username}</p>
-            <p style="font-size: 12px; margin-bottom: 4px;">${seller.city}, ${seller.state}</p>
+            <h3 style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(seller.displayName)}</h3>
+            <p style="color: #78716c; font-size: 12px; margin-bottom: 4px;">@${escapeHtml(seller.user.username)}</p>
+            <p style="font-size: 12px; margin-bottom: 4px;">${escapeHtml(seller.city)}, ${escapeHtml(seller.state)}</p>
             ${seller.distance ? `<p style="font-size: 12px; color: #78716c;">${seller.distance.toFixed(1)} mi away</p>` : ""}
             ${minPrice ? `<p style="font-size: 14px; font-weight: 500; color: #f59e0b;">From ${formatPrice(minPrice)}/dz</p>` : ""}
-            <a href="/@${seller.user.username}" style="
+            <a href="/@${encodeURIComponent(seller.user.username)}" style="
               display: block;
               margin-top: 8px;
               padding: 6px 12px;
