@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
         : null;
 
       let distance: number | null = null;
-      if (lat !== null && lng !== null && seller.lat && seller.lng) {
+      if (lat !== null && lng !== null && seller.lat !== null && seller.lng !== null) {
         distance = calculateDistance(lat, lng, seller.lat, seller.lng);
       }
 

@@ -145,7 +145,7 @@ export function SearchMap({ sellers, userLocation, onSellerClick, className }: S
     const sellerIcon = createCustomIcon("#f59e0b"); // amber-500
 
     sellers.forEach((seller) => {
-      if (seller.lat && seller.lng) {
+      if (seller.lat !== null && seller.lat !== undefined && seller.lng !== null && seller.lng !== undefined) {
         const marker = L.marker([seller.lat, seller.lng], { icon: sellerIcon })
           .addTo(mapRef.current!);
 
@@ -159,8 +159,8 @@ export function SearchMap({ sellers, userLocation, onSellerClick, className }: S
             <h3 style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(seller.displayName)}</h3>
             <p style="color: #78716c; font-size: 12px; margin-bottom: 4px;">@${escapeHtml(seller.user.username)}</p>
             <p style="font-size: 12px; margin-bottom: 4px;">${escapeHtml(seller.city)}, ${escapeHtml(seller.state)}</p>
-            ${seller.distance ? `<p style="font-size: 12px; color: #78716c;">${seller.distance.toFixed(1)} mi away</p>` : ""}
-            ${minPrice ? `<p style="font-size: 14px; font-weight: 500; color: #f59e0b;">From ${formatPrice(minPrice)}/dz</p>` : ""}
+            ${seller.distance != null ? `<p style="font-size: 12px; color: #78716c;">${seller.distance.toFixed(1)} mi away</p>` : ""}
+            ${minPrice != null ? `<p style="font-size: 14px; font-weight: 500; color: #f59e0b;">From ${formatPrice(minPrice)}/dz</p>` : ""}
             <a href="/@${encodeURIComponent(seller.user.username)}" style="
               display: block;
               margin-top: 8px;

@@ -96,6 +96,9 @@ export async function triggerNewOrder(
   await pusherServer.trigger(CHANNELS.seller(sellerId), EVENTS.NEW_ORDER, order)
 }
 
+// Notify a user about an order status change.
+// NOTE: userId here should be a Clerk ID (clerkId), matching the subscription
+// in dashboard/layout.tsx which subscribes to CHANNELS.user(clerkUserId).
 export async function triggerOrderUpdate(
   userId: string,
   update: {
@@ -108,7 +111,9 @@ export async function triggerOrderUpdate(
   await pusherServer.trigger(CHANNELS.user(userId), EVENTS.ORDER_UPDATE, update)
 }
 
-// Notify a user about a new message (for unread badge)
+// Notify a user about a new message (for unread badge).
+// NOTE: recipientId here should be a DB user ID, matching the subscription
+// in dashboard/layout.tsx which subscribes to CHANNELS.user(dbUserId).
 export async function triggerUserNewMessage(
   recipientId: string,
   message: {

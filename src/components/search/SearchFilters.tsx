@@ -71,8 +71,10 @@ export function SearchFilters({
   };
 
   const applyCustomPrice = () => {
-    const min = customMin ? parseFloat(customMin) : null;
-    const max = customMax ? parseFloat(customMax) : null;
+    const parsedMin = parseFloat(customMin);
+    const parsedMax = parseFloat(customMax);
+    const min = !isNaN(parsedMin) ? parsedMin : null;
+    const max = !isNaN(parsedMax) ? parsedMax : null;
     onPriceChange(min, max);
   };
 
