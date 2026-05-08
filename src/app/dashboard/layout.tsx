@@ -38,6 +38,7 @@ export default function DashboardLayout({
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [dbUserId, setDbUserId] = useState<string | null>(null);
   const lastPathRef = useRef(pathname);
+  const pathnameRef = useRef(pathname);
   
   // Initialize from localStorage (default to false if not set)
   const getInitialCollapsed = () => {
@@ -46,6 +47,11 @@ export default function DashboardLayout({
   };
   
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
+
+  // Keep pathnameRef in sync for use in event handlers
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   // Fetch unread message count and user ID
   useEffect(() => {
@@ -116,7 +122,7 @@ export default function DashboardLayout({
     channel.bind(EVENTS.USER_NEW_MESSAGE, () => {
       // Increment unread count when a new message arrives
       // Only if we're not on the messages page
-      if (!pathname.includes("/messages")) {
+      if (!pathnameRef.current.includes("/messages")) {
         setUnreadCount(prev => prev + 1);
       }
     });
@@ -140,7 +146,7 @@ export default function DashboardLayout({
       channel.unbind_all();
       pusher.unsubscribe(CHANNELS.user(dbUserId));
     };
-  }, [dbUserId, pathname]);
+  }, [dbUserId]);
 
   // Subscribe to Pusher for order updates (new orders and status changes)
   useEffect(() => {
@@ -153,7 +159,7 @@ export default function DashboardLayout({
     const sellerChannel = pusher.subscribe(CHANNELS.seller(clerkUserId));
     sellerChannel.bind(EVENTS.NEW_ORDER, () => {
       // Increment uncompleted orders when a new order arrives
-      if (!pathname.includes("/orders")) {
+      if (!pathnameRef.current.includes("/orders")) {
         setPendingOrdersCount(prev => prev + 1);
       } else {
         // Refetch if we're on the orders page
@@ -176,11 +182,11 @@ export default function DashboardLayout({
 
     return () => {
       sellerChannel.unbind_all();
-      userChannel.unbind(EVENTS.ORDER_UPDATE);
       pusher.unsubscribe(CHANNELS.seller(clerkUserId));
-      // Don't unsubscribe from user channel here as it's also used for messages
+      userChannel.unbind_all();
+      pusher.unsubscribe(CHANNELS.user(clerkUserId));
     };
-  }, [clerkUserId, pathname]);
+  }, [clerkUserId]);
 
   // Reset unread count when navigating to messages page
   useEffect(() => {
@@ -208,20 +214,22 @@ export default function DashboardLayout({
       refetch();
       return () => { cancelled = true; };
     }
-    
-    lastPathRef.current = pathname;
   }, [pathname]);
 
   // Reset pending orders when navigating to orders page
   useEffect(() => {
-    const prevPath = lastPathRef.current;
-    if (pathname.includes("/orders") && !prevPath.includes("/orders")) {
+    if (pathname.includes("/orders") && !lastPathRef.current.includes("/orders")) {
       // Refetch uncompleted orders when visiting orders page
       fetch("/api/orders?role=seller&uncompleted=true")
         .then(res => res.ok ? res.json() : [])
         .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
         .catch(() => {});
     }
+  }, [pathname]);
+
+  // Update lastPathRef after all navigation-detection effects have run
+  useEffect(() => {
+    lastPathRef.current = pathname;
   }, [pathname]);
 
   // Save collapsed state to localStorage
