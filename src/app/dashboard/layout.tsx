@@ -214,9 +214,10 @@ export default function DashboardLayout({
 
   // Reset pending orders when navigating to orders page
   useEffect(() => {
-    if (pathname.includes("/orders") && !lastPathRef.current.includes("/orders")) {
-      // Refetch pending orders when visiting orders page
-      fetch("/api/orders?role=seller&status=PENDING")
+    const prevPath = lastPathRef.current;
+    if (pathname.includes("/orders") && !prevPath.includes("/orders")) {
+      // Refetch uncompleted orders when visiting orders page
+      fetch("/api/orders?role=seller&uncompleted=true")
         .then(res => res.ok ? res.json() : [])
         .then(orders => setPendingOrdersCount(Array.isArray(orders) ? orders.length : 0))
         .catch(() => {});

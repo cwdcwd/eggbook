@@ -18,14 +18,14 @@ async function handleCheckoutCompleted(
 
   if (!orderId) return;
 
-  // Idempotency guard: only update if order hasn't already been paid
+  // Only transition from CONFIRMED → PAID (the expected pre-payment status)
   const existingOrder = await db.order.findUnique({
     where: { id: orderId },
     select: { status: true },
   });
 
-  if (existingOrder?.status === "PAID" || existingOrder?.status === "COMPLETED") {
-    console.log(`[stripe-webhook] Order ${orderId} already ${existingOrder.status}, skipping`);
+  if (existingOrder?.status !== "CONFIRMED") {
+    console.log(`[stripe-webhook] Order ${orderId} status is ${existingOrder?.status}, expected CONFIRMED — skipping`);
     return;
   }
 

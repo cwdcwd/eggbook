@@ -53,7 +53,13 @@ export async function POST(req: NextRequest) {
     }
 
     // Create Stripe checkout session
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${req.nextUrl.protocol}//${req.headers.get('host')}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!baseUrl) {
+      return NextResponse.json(
+        { error: "Server configuration error: NEXT_PUBLIC_APP_URL not set" },
+        { status: 500 }
+      );
+    }
     const amountInCents = Math.round(order.totalPrice * 100);
     const platformFeeInCents = Math.round(order.platformFee * 100);
 

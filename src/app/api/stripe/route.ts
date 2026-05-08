@@ -34,7 +34,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${req.nextUrl.protocol}//${req.headers.get('host')}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!baseUrl) {
+      return NextResponse.json(
+        { error: "Server configuration error: NEXT_PUBLIC_APP_URL not set" },
+        { status: 500 }
+      );
+    }
     let stripeAccountId = user.sellerProfile.stripeAccountId;
 
     // Create Stripe account if doesn't exist
