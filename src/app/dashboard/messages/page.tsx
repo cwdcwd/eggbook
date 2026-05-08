@@ -197,7 +197,8 @@ function MessagesPageContent() {
     const pusher = getPusherClient();
     if (!pusher) return;
 
-    const channel = pusher.subscribe(CHANNELS.conversation(selectedConversation.id));
+    const channelName = CHANNELS.conversation(selectedConversation.id);
+    const channel = pusher.subscribe(channelName);
 
     channel.bind(EVENTS.NEW_MESSAGE, (message: Message) => {
       setMessages((prev) =>
@@ -207,7 +208,7 @@ function MessagesPageContent() {
 
     return () => {
       channel.unbind_all();
-      channel.unsubscribe();
+      pusher.unsubscribe(channelName);
     };
   }, [selectedConversation]);
 

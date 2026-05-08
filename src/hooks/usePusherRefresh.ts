@@ -29,34 +29,36 @@ export function usePusherRefresh(
     const pusher = getPusherClient();
     if (!pusher) return;
 
-    const channels: ReturnType<typeof pusher.subscribe>[] = [];
+    const channelNames: string[] = [];
 
     // Subscribe to seller channel for new orders
     if (events.includes("new-order")) {
-      const sellerChannel = pusher.subscribe(CHANNELS.seller(clerkUserId));
+      const channelName = CHANNELS.seller(clerkUserId);
+      const sellerChannel = pusher.subscribe(channelName);
       sellerChannel.bind(EVENTS.NEW_ORDER, debouncedRefresh);
-      channels.push(sellerChannel);
+      channelNames.push(channelName);
     }
 
     // Subscribe to user channel for order updates
     if (events.includes("order-update")) {
-      const userChannel = pusher.subscribe(CHANNELS.user(clerkUserId));
+      const channelName = CHANNELS.user(clerkUserId);
+      const userChannel = pusher.subscribe(channelName);
       userChannel.bind(EVENTS.ORDER_UPDATE, debouncedRefresh);
-      channels.push(userChannel);
+      channelNames.push(channelName);
     }
 
     // Subscribe to user channel (by DB ID) for new messages
     if (events.includes("user-new-message") && dbUserId) {
-      const userChannel = pusher.subscribe(CHANNELS.user(dbUserId));
+      const channelName = CHANNELS.user(dbUserId);
+      const userChannel = pusher.subscribe(channelName);
       userChannel.bind(EVENTS.USER_NEW_MESSAGE, debouncedRefresh);
-      channels.push(userChannel);
+      channelNames.push(channelName);
     }
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      channels.forEach((ch) => {
-        ch.unbind_all();
-        ch.unsubscribe();
+      channelNames.forEach((name) => {
+        pusher.unsubscribe(name);
       });
     };
   }, [clerkUserId, dbUserId, events, debouncedRefresh]);

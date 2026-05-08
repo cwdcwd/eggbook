@@ -23,6 +23,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Ensure user exists in DB before checking limits
+    const user = await getOrCreateUser(userId);
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // DB check for listing limits only (not subscription status)
     const dbCheck = await canCreateListing(userId);
     if (!dbCheck.allowed) {
@@ -30,13 +36,6 @@ export async function POST(req: NextRequest) {
         { error: dbCheck.reason, code: dbCheck.code },
         { status: 403 }
       );
-    }
-
-    // Get user with seller profile
-    const user = await getOrCreateUser(userId);
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     // Auto-create seller profile if doesn't exist (upgrade to SELLER role)
