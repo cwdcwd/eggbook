@@ -99,6 +99,10 @@ export async function triggerNewOrder(
 // Notify a user about an order status change.
 // NOTE: userId here should be a Clerk ID (clerkId), matching the subscription
 // in dashboard/layout.tsx which subscribes to CHANNELS.user(clerkUserId).
+// We intentionally reuse CHANNELS.user() for both ID types because the channel
+// name is opaque to Pusher — what matters is publish/subscribe consistency per
+// feature (orders use clerkId, messages use dbUserId). Splitting into separate
+// helpers would add indirection without preventing misuse at call sites.
 export async function triggerOrderUpdate(
   userId: string,
   update: {

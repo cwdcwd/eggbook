@@ -201,11 +201,15 @@ function ExploreContent() {
 
     try {
       const isFavorite = favorites.includes(sellerId);
-      const res = await fetch("/api/favorites", {
-        method: isFavorite ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sellerId }),
-      });
+      const res = isFavorite
+        ? await fetch(`/api/favorites?sellerProfileId=${encodeURIComponent(sellerId)}`, {
+            method: "DELETE",
+          })
+        : await fetch("/api/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sellerProfileId: sellerId }),
+          });
 
       if (res.ok) {
         setFavorites((prev) =>
@@ -227,7 +231,7 @@ function ExploreContent() {
       .then((res) => res.ok ? res.json() : [])
       .then((data) => {
         if (Array.isArray(data)) {
-          setFavorites(data.map((f: any) => f.sellerId));
+          setFavorites(data.map((f: any) => f.sellerProfileId));
         }
       })
       .catch(() => {});
