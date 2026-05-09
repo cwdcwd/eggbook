@@ -49,11 +49,12 @@ export default async function CheckoutSuccessPage({
         session.payment_status === "paid"
       ) {
         // Conditionally update only if status is still CONFIRMED (idempotent)
+        // Note: does NOT set stripePaymentId — that's the webhook's responsibility,
+        // which also handles volume tracking and seller notifications.
         const updated = await db.order.updateMany({
           where: { id: orderId, status: "CONFIRMED" },
           data: {
             status: "PAID",
-            stripePaymentId: session.payment_intent as string,
             paidAt: new Date(),
           },
         });

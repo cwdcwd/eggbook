@@ -31,31 +31,29 @@ async function handleCheckoutCompleted(
     return;
   }
 
-  // Already processed this payment
-  if (existingOrder.stripePaymentId) {
-    console.log(`[stripe-webhook] Order ${orderId} already has stripePaymentId — skipping duplicate`);
-    return;
-  }
-
   const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
   if (!validStatuses.includes(existingOrder.status)) {
     console.log(`[stripe-webhook] Order ${orderId} status is ${existingOrder.status}, not in ${validStatuses.join("/")} — skipping`);
     return;
   }
 
-  // If CONFIRMED, advance to PAID. If already PAID/COMPLETED, just record payment details.
-  const shouldAdvanceStatus = existingOrder.status === "CONFIRMED";
-
-  await db.order.update({
-    where: { id: orderId },
+  // Atomically set stripePaymentId only if not already set (idempotency guard).
+  // This ensures volume/notification logic runs exactly once per payment.
+  const updated = await db.order.updateMany({
+    where: { id: orderId, stripePaymentId: null },
     data: {
-      ...(shouldAdvanceStatus && { status: "PAID" }),
+      ...(existingOrder.status === "CONFIRMED" && { status: "PAID" }),
       stripePaymentId: session.payment_intent as string,
       paidAt: new Date(),
     },
   });
 
-  if (shouldAdvanceStatus) {
+  if (updated.count === 0) {
+    console.log(`[stripe-webhook] Order ${orderId} stripePaymentId already set — skipping (idempotent)`);
+    return;
+  }
+
+  if (existingOrder.status === "CONFIRMED") {
     await logOrderStatusChange({
       orderId,
       fromStatus: "CONFIRMED",
@@ -66,11 +64,11 @@ async function handleCheckoutCompleted(
         stripeEventId: eventId,
         stripeSessionId: session.id,
         stripePaymentIntentId: session.payment_intent,
-    },
-  });
+      },
+    });
   }
 
-  // Update seller's monthly volume
+  // Update seller's monthly volume and notify
   const order = await db.order.findUnique({
     where: { id: orderId },
     include: { seller: { include: { user: true } } },
@@ -151,39 +149,39 @@ async function handlePaymentIntentSucceeded(
 
   if (!existingOrder) return;
 
-  // Already processed
-  if (existingOrder.stripePaymentId) return;
-
   const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
-  if (existingOrder && validStatuses.includes(existingOrder.status)) {
-    const shouldAdvance = existingOrder.status === "CONFIRMED";
+  if (!validStatuses.includes(existingOrder.status)) return;
 
-    await db.order.update({
-      where: { id: piOrderId },
-      data: {
-        ...(shouldAdvance && { status: "PAID" }),
-        stripePaymentId: paymentIntent.id,
-        paidAt: new Date(),
+  // Atomically set stripePaymentId only if not already set
+  const updated = await db.order.updateMany({
+    where: { id: piOrderId, stripePaymentId: null },
+    data: {
+      ...(existingOrder.status === "CONFIRMED" && { status: "PAID" }),
+      stripePaymentId: paymentIntent.id,
+      paidAt: new Date(),
+    },
+  });
+
+  if (updated.count === 0) {
+    console.log(`[stripe-webhook] Order ${piOrderId} stripePaymentId already set — skipping (idempotent)`);
+    return;
+  }
+
+  if (existingOrder.status === "CONFIRMED") {
+    await logOrderStatusChange({
+      orderId: piOrderId,
+      fromStatus: "CONFIRMED",
+      toStatus: "PAID",
+      changedByType: "SYSTEM",
+      reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
+      metadata: {
+        stripeEventId: eventId,
+        stripePaymentIntentId: paymentIntent.id,
       },
     });
-
-    if (shouldAdvance) {
-      await logOrderStatusChange({
-        orderId: piOrderId,
-        fromStatus: "CONFIRMED",
-        toStatus: "PAID",
-        changedByType: "SYSTEM",
-        reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
-        metadata: {
-          stripeEventId: eventId,
-          stripePaymentIntentId: paymentIntent.id,
-        },
-      });
-    }
-    console.log(`[stripe-webhook] Order ${piOrderId} updated to PAID via payment_intent fallback`);
-  } else {
-    console.log(`[stripe-webhook] Order ${piOrderId} status is ${existingOrder?.status}, no update needed`);
   }
+
+  console.log(`[stripe-webhook] Order ${piOrderId} updated via payment_intent fallback`);
 }
 
 async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
