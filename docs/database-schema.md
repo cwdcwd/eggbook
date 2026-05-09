@@ -1,10 +1,10 @@
 # Eggbook Database Schema
 
-This document describes the current database schema and proposed changes for subscription support.
+This document describes the database schema for the Eggbook marketplace. The source of truth is [`prisma/schema.prisma`](../prisma/schema.prisma).
 
 ---
 
-## Current Schema
+## Schema
 
 ### User
 
@@ -17,6 +17,11 @@ Synced from Clerk authentication. Core user identity.
 | `username` | String | Display username (unique) |
 | `email` | String | Email address (unique) |
 | `role` | UserRole | BUYER, SELLER, or ADMIN |
+| `subscriptionId` | String? | Clerk subscription ID |
+| `subscriptionPlan` | String? | Plan name (e.g., "seller_plan") |
+| `subscriptionStatus` | SubscriptionStatus | Current subscription state (default: NONE) |
+| `subscriptionExpiresAt` | DateTime? | When subscription ends |
+| `listingLimit` | Int? | Max listings allowed (null = unlimited) |
 | `createdAt` | DateTime | Account creation time |
 | `updatedAt` | DateTime | Last update time |
 
@@ -50,6 +55,7 @@ Extended profile for sellers with location and payment settings.
 | `pickupType` | PickupType | TIMESLOT, HOURS, or ARRANGED |
 | `pickupHours` | Json? | Available pickup times |
 | `isActive` | Boolean | Profile visibility (default: true) |
+| `autoAcceptOrders` | Boolean | Auto-confirm orders (default: true). False = manual confirmation required |
 | `paymentMethod` | PaymentMethod | PLATFORM or OWN_STRIPE |
 | `stripeAccountId` | String? | Stripe Connect account ID |
 | `stripeOnboarded` | Boolean | Stripe setup complete |
@@ -61,6 +67,7 @@ Extended profile for sellers with location and payment settings.
 - `listings` → EggListing[]
 - `orders` → Order[] (as seller)
 - `posts` → Post[]
+- `favorites` → Favorite[] (via sellerProfileId)
 
 ---
 
@@ -80,6 +87,7 @@ Product listings with flexible pricing units.
 | `customUnitQty` | Int? | Quantity in custom unit |
 | `stockCount` | Int | Available stock (default: 0) |
 | `isAvailable` | Boolean | Listing visibility (default: true) |
+| `hiddenBySubscription` | Boolean | True if hidden due to subscription expiry (default: false) |
 | `photos` | String[] | Vercel Blob URLs |
 | `createdAt` | DateTime | Creation time |
 | `updatedAt` | DateTime | Last update time |
@@ -138,6 +146,31 @@ Purchase orders with request-based flow.
 - `seller` → SellerProfile
 - `listing` → EggListing
 - `conversation` → Conversation (optional, 1:1)
+- `statusHistory` → OrderStatusHistory[]
+
+---
+
+### OrderStatusHistory
+
+Audit trail for order status changes.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | String (cuid) | Primary key |
+| `orderId` | String | FK to Order |
+| `fromStatus` | OrderStatus? | Previous status (null for initial creation) |
+| `toStatus` | OrderStatus | New status |
+| `changedBy` | String? | clerkId of user, or null for system/webhook |
+| `changedByType` | ChangeActorType | Who made the change (default: SYSTEM) |
+| `reason` | String? | Cancel reason, payment ID, etc. |
+| `metadata` | Json? | Additional context (e.g., stripeEventId) |
+| `createdAt` | DateTime | Change timestamp |
+
+**Relations:**
+- `order` → Order (cascade delete)
+
+**Indexes:**
+- `orderId` — for fast lookups by order
 
 ---
 
@@ -246,6 +279,18 @@ Tracks monthly sales for fee tier calculation.
 - `SELLER` - Can list eggs and sell
 - `ADMIN` - Full administrative access
 
+### SubscriptionStatus
+- `NONE` - No subscription
+- `ACTIVE` - Active and valid
+- `CANCELED` - User canceled, may still be active until period ends
+- `EXPIRED` - Subscription ended, listings hidden immediately
+
+### ChangeActorType
+- `BUYER` - Change made by the buyer
+- `SELLER` - Change made by the seller
+- `ADMIN` - Change made by an admin
+- `SYSTEM` - Webhooks, automated processes
+
 ### PaymentMethod
 - `PLATFORM` - Eggbook handles payments, pays out sellers
 - `OWN_STRIPE` - Seller connects their own Stripe account
@@ -281,41 +326,6 @@ Tracks monthly sales for fee tier calculation.
 
 ---
 
-## Proposed Changes for Subscription Support
-
-### New Fields on User
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `subscriptionId` | String? | Clerk subscription ID |
-| `subscriptionPlan` | String? | Plan name (e.g., "seller_plan") |
-| `subscriptionStatus` | SubscriptionStatus | Current subscription state |
-| `subscriptionExpiresAt` | DateTime? | When subscription ends |
-| `listingLimit` | Int? | Max listings allowed (null = unlimited) |
-
-### New Enum: SubscriptionStatus
-
-```prisma
-enum SubscriptionStatus {
-  NONE      // No subscription
-  ACTIVE    // Active and valid
-  CANCELED  // User canceled, may still be active until period ends
-  EXPIRED   // Subscription ended, listings hidden immediately
-}
-```
-
-> **Note:** No PAST_DUE status. Listings are hidden immediately on subscription end.
-
-### New Field on EggListing
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `hiddenBySubscription` | Boolean | True if hidden due to subscription expiry (default: false) |
-
-This field distinguishes listings hidden because the seller's subscription expired from listings the seller intentionally marked as unavailable. When a subscription is reactivated, only listings with `hiddenBySubscription = true` should be restored to `isAvailable = true`.
-
----
-
 ## Entity Relationship Diagrams
 
 ### Complete Schema
@@ -333,11 +343,13 @@ erDiagram
     SellerProfile ||--o{ Order : "receives"
     SellerProfile ||--o{ Post : "publishes"
     SellerProfile ||--o{ SellerMonthlyVolume : "tracks"
+    SellerProfile ||--o{ Favorite : "favorited by"
 
     EggListing ||--o{ Order : "ordered in"
     EggListing }o--o{ Tag : "tagged with"
 
     Order ||--o| Conversation : "has"
+    Order ||--o{ OrderStatusHistory : "audit trail"
     Conversation ||--o{ Message : "contains"
 
     User {
@@ -346,6 +358,11 @@ erDiagram
         string username UK
         string email UK
         UserRole role
+        SubscriptionStatus subscriptionStatus
+        string subscriptionId
+        string subscriptionPlan
+        datetime subscriptionExpiresAt
+        int listingLimit
         datetime createdAt
         datetime updatedAt
     }
@@ -366,6 +383,7 @@ erDiagram
         PickupType pickupType
         json pickupHours
         boolean isActive
+        boolean autoAcceptOrders
         PaymentMethod paymentMethod
         string stripeAccountId
         boolean stripeOnboarded
@@ -382,6 +400,7 @@ erDiagram
         int customUnitQty
         int stockCount
         boolean isAvailable
+        boolean hiddenBySubscription
         string[] photos
     }
 
@@ -399,6 +418,18 @@ erDiagram
         string deliveryAddress
         string stripePaymentId
         datetime paidAt
+    }
+
+    OrderStatusHistory {
+        string id PK
+        string orderId FK
+        OrderStatus fromStatus
+        OrderStatus toStatus
+        string changedBy
+        ChangeActorType changedByType
+        string reason
+        json metadata
+        datetime createdAt
     }
 
     Conversation {
@@ -474,7 +505,7 @@ flowchart LR
     SP -->|sends| M
 ```
 
-### Subscription Flow (Proposed)
+### Subscription Flow
 
 ```mermaid
 stateDiagram-v2
@@ -495,28 +526,3 @@ stateDiagram-v2
 ```
 
 > **Note:** No grace period. Listings are hidden immediately when subscription ends.
-
-### Data Model with Proposed Subscription Fields
-
-```mermaid
-erDiagram
-    User ||--o| SellerProfile : "has"
-    User ||--o{ EggListing : "owns (via SellerProfile)"
-
-    User {
-        string id PK
-        string clerkId UK
-        string subscriptionId "NEW"
-        string subscriptionPlan "NEW"
-        SubscriptionStatus subscriptionStatus "NEW"
-        datetime subscriptionExpiresAt "NEW"
-        int listingLimit "NEW"
-    }
-
-    EggListing {
-        string id PK
-        string sellerId FK
-        boolean isAvailable
-        boolean hiddenBySubscription "NEW"
-    }
-```
