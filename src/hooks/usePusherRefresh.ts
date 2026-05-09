@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
+import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher-client";
 
 /**
  * Subscribe to Pusher events and call a refresh callback when relevant events fire.
@@ -23,6 +23,10 @@ export function usePusherRefresh(
     }, 500);
   }, [onRefresh]);
 
+  // Stabilize events array so callers don't need to memoize
+  const eventsKey = events.slice().sort().join(",");
+  const stableEvents = useMemo(() => events, [eventsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!clerkUserId) return;
 
@@ -32,7 +36,7 @@ export function usePusherRefresh(
     const channelNames: string[] = [];
 
     // Subscribe to seller channel for new orders
-    if (events.includes("new-order")) {
+    if (stableEvents.includes("new-order")) {
       const channelName = CHANNELS.seller(clerkUserId);
       const sellerChannel = pusher.subscribe(channelName);
       sellerChannel.bind(EVENTS.NEW_ORDER, debouncedRefresh);
@@ -40,7 +44,7 @@ export function usePusherRefresh(
     }
 
     // Subscribe to user channel for order updates
-    if (events.includes("order-update")) {
+    if (stableEvents.includes("order-update")) {
       const channelName = CHANNELS.user(clerkUserId);
       const userChannel = pusher.subscribe(channelName);
       userChannel.bind(EVENTS.ORDER_UPDATE, debouncedRefresh);
@@ -48,7 +52,7 @@ export function usePusherRefresh(
     }
 
     // Subscribe to user channel (by DB ID) for new messages
-    if (events.includes("user-new-message") && dbUserId) {
+    if (stableEvents.includes("user-new-message") && dbUserId) {
       const channelName = CHANNELS.user(dbUserId);
       const userChannel = pusher.subscribe(channelName);
       userChannel.bind(EVENTS.USER_NEW_MESSAGE, debouncedRefresh);
@@ -61,5 +65,5 @@ export function usePusherRefresh(
         pusher.unsubscribe(name);
       });
     };
-  }, [clerkUserId, dbUserId, events, debouncedRefresh]);
+  }, [clerkUserId, dbUserId, stableEvents, debouncedRefresh]);
 }

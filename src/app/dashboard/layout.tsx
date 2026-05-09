@@ -16,7 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
+import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher-client";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },

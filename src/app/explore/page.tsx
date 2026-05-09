@@ -73,8 +73,19 @@ function ExploreContent() {
   const [delivery, setDelivery] = useState(searchParams.get("delivery") === "true");
   const [sort, setSort] = useState(searchParams.get("sort") || "relevance");
   
-  // Location state
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  // Location state — restore from URL params if present
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(() => {
+    const lat = searchParams.get("lat");
+    const lng = searchParams.get("lng");
+    if (lat && lng) {
+      const parsedLat = parseFloat(lat);
+      const parsedLng = parseFloat(lng);
+      if (!isNaN(parsedLat) && !isNaN(parsedLng)) {
+        return { lat: parsedLat, lng: parsedLng };
+      }
+    }
+    return null;
+  });
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   
   // View state

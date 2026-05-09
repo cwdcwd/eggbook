@@ -7,7 +7,7 @@ import { useUser } from "@clerk/nextjs";
 import { Send, ArrowLeft, User, Heart, Search, Loader2 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
-import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
+import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher-client";
 
 interface Message {
   id: string;
