@@ -39,7 +39,7 @@ npm install
 
 # Configure environment
 cp .env.example .env.local
-# Fill in all values in .env.local (see .env.example for descriptions)
+# Fill in required values (optional integrations like Upstash are noted in the file)
 
 # Set up the database
 npx prisma db push        # Push schema to database
