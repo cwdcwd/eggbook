@@ -178,13 +178,13 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       const auditReason = (() => {
         if (cancelReason) return cancelReason;
         if (action === "markPaid") return "Marked as paid (external payment)";
-        if (action === "complete" && order.status === "CONFIRMED") return "Completed with external payment";
+        if (action === "complete" && current.status === "CONFIRMED") return "Completed with external payment";
         return null;
       })();
 
       await logOrderStatusChange({
         orderId: id,
-        fromStatus: order.status,
+        fromStatus: current.status,
         toStatus: transition.toStatus,
         changedBy: userId,
         changedByType: actorType,

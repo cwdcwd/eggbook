@@ -67,14 +67,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Clerk's has() is the authoritative subscription check for seller settings
+    // Clerk's has() is the authoritative subscription check for seller-specific settings
     const hasListingFeature = has?.({ feature: "listing" }) ?? false;
-    if (!hasListingFeature) {
-      return NextResponse.json(
-        { error: "Seller subscription required to update seller settings", code: "SUBSCRIPTION_REQUIRED" },
-        { status: 403 }
-      );
-    }
 
     const user = await getOrCreateUser(userId);
 
@@ -118,6 +112,16 @@ export async function PUT(req: NextRequest) {
     if (state !== undefined) updateData.state = state?.trim() || null;
     if (zip !== undefined) updateData.zip = zip?.trim() || null;
     if (hasMaxDeliveryDistance) updateData.maxDeliveryDistance = maxDeliveryDistanceFloat;
+
+    // Seller-specific settings require an active subscription
+    if (pickupType !== undefined || paymentMethod !== undefined || autoAcceptOrders !== undefined) {
+      if (!hasListingFeature) {
+        return NextResponse.json(
+          { error: "Seller subscription required to update seller settings", code: "SUBSCRIPTION_REQUIRED" },
+          { status: 403 }
+        );
+      }
+    }
     if (pickupType !== undefined) updateData.pickupType = pickupType as PickupType;
     if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod as PaymentMethod;
     if (autoAcceptOrders !== undefined) updateData.autoAcceptOrders = autoAcceptOrders;
