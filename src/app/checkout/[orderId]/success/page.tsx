@@ -48,8 +48,9 @@ export default async function CheckoutSuccessPage({
         session.metadata?.orderId === orderId &&
         session.payment_status === "paid"
       ) {
-        await db.order.update({
-          where: { id: orderId },
+        // Conditionally update only if status is still CONFIRMED (idempotent)
+        const updated = await db.order.updateMany({
+          where: { id: orderId, status: "CONFIRMED" },
           data: {
             status: "PAID",
             stripePaymentId: session.payment_intent as string,
@@ -57,17 +58,20 @@ export default async function CheckoutSuccessPage({
           },
         });
 
-        await logOrderStatusChange({
-          orderId,
-          fromStatus: "CONFIRMED",
-          toStatus: "PAID",
-          changedByType: "SYSTEM",
-          reason: "Payment confirmed via Stripe API (webhook fallback)",
-          metadata: {
-            stripeSessionId: session.id,
-            stripePaymentIntentId: session.payment_intent,
-          },
-        });
+        // Only log if we actually changed the status
+        if (updated.count > 0) {
+          await logOrderStatusChange({
+            orderId,
+            fromStatus: "CONFIRMED",
+            toStatus: "PAID",
+            changedByType: "SYSTEM",
+            reason: "Payment confirmed via Stripe API (webhook fallback)",
+            metadata: {
+              stripeSessionId: session.id,
+              stripePaymentIntentId: session.payment_intent,
+            },
+          });
+        }
 
         // Re-fetch to get updated status
         order = await db.order.findUnique({

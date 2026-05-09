@@ -186,3 +186,27 @@ Shared UI primitives are in `src/components/ui/`:
 - `Badge` - status indicators
 
 Import from the barrel file: `import { Button, Card } from '@/components/ui'`
+
+## Known False Positives for Code Review
+
+These patterns are **correct** in this codebase. Do NOT flag them as issues:
+
+### `clerkClient` is callable in Clerk v7
+In `@clerk/nextjs` v7, `clerkClient` exported from `@clerk/nextjs/server` is typed as `() => Promise<ClerkClient>`. Calling `await clerkClient()` is the **correct** usage pattern. It is NOT a plain object — it is a function that returns a client instance. See the type definition at `node_modules/@clerk/nextjs/dist/types/server/clerkClient.d.ts`.
+
+```typescript
+// CORRECT — do NOT suggest removing the function call
+const client = await clerkClient();
+await client.users.updateUserProfileImage(userId, { file });
+```
+
+### `auth.protect()` in Clerk middleware
+In Clerk v7 middleware, `auth` is a function object that supports both `auth()` and `auth.protect()`. Both patterns are valid. `auth.protect()` returns session data and can be used instead of calling `auth()` separately.
+
+### Pusher module structure
+The project intentionally splits Pusher code into three files:
+- `src/lib/pusher-constants.ts` — shared channel/event constants (no dependencies)
+- `src/lib/pusher-client.ts` — client-side Pusher instance + re-exports constants
+- `src/lib/pusher.ts` — server-side Pusher instance + trigger helpers (imports constants directly, NOT pusher-client)
+
+Server API routes import from `@/lib/pusher`. Client components import from `@/lib/pusher-client`. This is intentional to avoid pulling `pusher-js` into the server bundle.

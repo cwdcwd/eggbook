@@ -142,6 +142,12 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
     // Update order and log status change in transaction
     const updatedOrder = await db.$transaction(async (tx) => {
+      // Re-read inside transaction to get current state (guards against concurrent webhook updates)
+      const current = await tx.order.findUniqueOrThrow({
+        where: { id },
+        select: { paidAt: true, status: true },
+      });
+
       const updated = await tx.order.update({
         where: { id },
         data: {
@@ -149,7 +155,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
           ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
           ...(action === "decline" && { cancelReason }),
           ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
-          ...(action === "complete" && { completedAt: new Date(), ...(!order.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
+          ...(action === "complete" && { completedAt: new Date(), ...(!current.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
         },
         include: {
           listing: true,

@@ -25,13 +25,12 @@ export default clerkMiddleware(async (auth, req) => {
     return
   }
 
-  // Protect all other routes
-  await auth.protect()
+  // Protect all other routes — returns session data
+  const session = await auth.protect()
 
   // Admin routes: fail-closed — only users with explicit admin claim pass
   if (isAdminRoute(req)) {
-    const { sessionClaims } = await auth()
-    const metadata = sessionClaims?.metadata as { role?: string } | undefined
+    const metadata = session.sessionClaims?.metadata as { role?: string } | undefined
     const clerkRole = metadata?.role?.toUpperCase()
 
     // Only allow if role claim is explicitly "ADMIN"
