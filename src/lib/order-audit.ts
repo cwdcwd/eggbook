@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { OrderStatus, ChangeActorType, Prisma } from "@prisma/client";
 
-type TransactionClient = Parameters<Parameters<typeof db.$transaction>[0]>[0];
+type TransactionClient = Prisma.TransactionClient;
 
 interface LogStatusChangeParams {
   orderId: string;

@@ -44,10 +44,11 @@ function SellerCard({ seller, onFavorite, isFavorite }: { seller: Seller; onFavo
   const coverPhoto = seller.listings?.[0]?.photos?.[0] || seller.avatarUrl;
 
   return (
-    <Link href={`/@${seller.user.username}`}>
-      <Card className="overflow-hidden hover:shadow-lg transition-all hover:-translate-y-1 group h-full">
-        <div className="aspect-[4/3] relative bg-amber-100">
-          {coverPhoto ? (
+    <div className="relative h-full">
+      <Link href={`/@${seller.user.username}`} className="block h-full">
+        <Card className="overflow-hidden hover:shadow-lg transition-all hover:-translate-y-1 group h-full">
+          <div className="aspect-[4/3] relative bg-amber-100">
+            {coverPhoto ? (
             <Image
               src={coverPhoto}
               alt={seller.displayName}
@@ -71,26 +72,7 @@ function SellerCard({ seller, onFavorite, isFavorite }: { seller: Seller; onFavo
             )}
           </div>
 
-          {/* Favorite button */}
-          {onFavorite && (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onFavorite(seller.id);
-              }}
-              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-              aria-pressed={isFavorite}
-              className={cn(
-                "absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-                isFavorite 
-                  ? "bg-red-500 text-white" 
-                  : "bg-white/90 text-amber-400 hover:text-red-500"
-              )}
-            >
-              <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
-            </button>
-          )}
+          {/* Favorite button placeholder space */}
 
           {/* Distance badge */}
           {seller.distance !== undefined && (
@@ -147,6 +129,23 @@ function SellerCard({ seller, onFavorite, isFavorite }: { seller: Seller; onFavo
         </div>
       </Card>
     </Link>
+    {/* Favorite button outside Link to avoid nested interactive elements */}
+    {onFavorite && (
+      <button
+        onClick={() => onFavorite(seller.id)}
+        aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+        aria-pressed={isFavorite}
+        className={cn(
+          "absolute top-2 right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+          isFavorite 
+            ? "bg-red-500 text-white" 
+            : "bg-white/90 text-amber-400 hover:text-red-500"
+        )}
+      >
+        <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
+      </button>
+    )}
+    </div>
   );
 }
 
@@ -158,11 +157,12 @@ function SellerListItem({ seller, onFavorite, isFavorite }: { seller: Seller; on
   const coverPhoto = seller.listings?.[0]?.photos?.[0] || seller.avatarUrl;
 
   return (
-    <Link href={`/@${seller.user.username}`}>
-      <Card className="overflow-hidden hover:shadow-md transition-shadow">
-        <div className="flex gap-4 p-4">
-          {/* Image */}
-          <div className="w-32 h-24 relative rounded-lg overflow-hidden bg-amber-100 flex-shrink-0">
+    <div className="relative">
+      <Link href={`/@${seller.user.username}`} className="block">
+        <Card className="overflow-hidden hover:shadow-md transition-shadow">
+          <div className="flex gap-4 p-4">
+            {/* Image */}
+            <div className="w-32 h-24 relative rounded-lg overflow-hidden bg-amber-100 flex-shrink-0">
             {coverPhoto ? (
               <Image
                 src={coverPhoto}
@@ -210,25 +210,6 @@ function SellerListItem({ seller, onFavorite, isFavorite }: { seller: Seller; on
                     <p className="text-xs text-amber-400">/dozen</p>
                   </div>
                 )}
-                {onFavorite && (
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onFavorite(seller.id);
-                    }}
-                    aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                    aria-pressed={isFavorite}
-                    className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-                      isFavorite 
-                        ? "bg-red-100 text-red-500" 
-                        : "bg-amber-100 text-amber-400 hover:text-red-500"
-                    )}
-                  >
-                    <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
-                  </button>
-                )}
               </div>
             </div>
 
@@ -255,6 +236,23 @@ function SellerListItem({ seller, onFavorite, isFavorite }: { seller: Seller; on
         </div>
       </Card>
     </Link>
+    {/* Favorite button outside Link to avoid nested interactive elements */}
+    {onFavorite && (
+      <button
+        onClick={() => onFavorite(seller.id)}
+        aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+        aria-pressed={isFavorite}
+        className={cn(
+          "absolute top-2 right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+          isFavorite 
+            ? "bg-red-100 text-red-500" 
+            : "bg-amber-100 text-amber-400 hover:text-red-500"
+        )}
+      >
+        <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
+      </button>
+    )}
+    </div>
   );
 }
 

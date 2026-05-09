@@ -5,7 +5,7 @@ import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { notifyUser } from "@/lib/beams-server";
-import { rateLimit } from "@/lib/rate-limit";
+
 
 // --- Shared business logic helpers ---
 
@@ -243,11 +243,7 @@ async function handleAccountUpdated(account: Stripe.Account) {
 // --- Route handler ---
 
 export async function POST(req: Request) {
-  // Rate limit by IP
   const headersList = await headers();
-  const ip = headersList.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-  const rl = await rateLimit(ip, "webhook");
-  if (!rl.success) return rl.response;
 
   const body = await req.text();
   const signature = headersList.get("stripe-signature");

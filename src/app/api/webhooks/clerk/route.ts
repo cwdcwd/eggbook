@@ -2,7 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { rateLimit } from "@/lib/rate-limit";
+
 import {
   handleSubscriptionActivation,
   handleSubscriptionUpdate,
@@ -10,11 +10,7 @@ import {
 } from "@/lib/subscription";
 
 export async function POST(req: Request) {
-  // Rate limit by IP
   const headerPayload = await headers();
-  const ip = headerPayload.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-  const rl = await rateLimit(ip, "webhook");
-  if (!rl.success) return rl.response;
 
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
