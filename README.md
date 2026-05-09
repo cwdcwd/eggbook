@@ -56,7 +56,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Start development server |
-| `npm run build` | Production build (runs Prisma generate + service worker copy + Next.js build) |
+| `npm run build` | Production build (Prisma generate + service worker copy + Next.js build) |
 | `npm start` | Start production server |
 | `npm run lint` | Run ESLint |
 | `npm run db:seed` | Seed database with sample data |
@@ -72,7 +72,7 @@ src/
 │   ├── (auth)/            # Auth pages (sign-in, sign-up)
 │   ├── [username]/        # Dynamic seller profile pages (@username)
 │   ├── admin/             # Admin dashboard (role-gated)
-│   ├── api/               # API routes (20 endpoints)
+│   ├── api/               # API routes
 │   ├── checkout/          # Stripe checkout flow
 │   ├── dashboard/         # Seller/buyer dashboard
 │   ├── explore/           # Search and discovery
