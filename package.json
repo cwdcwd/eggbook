@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate && npm run copy-sw",
+    "db:migrate": "prisma migrate deploy",
     "copy-sw": "node scripts/copy-sw.mjs",
     "db:seed": "tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup.ts",
