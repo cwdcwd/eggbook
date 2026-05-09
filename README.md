@@ -1,36 +1,123 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Eggbook 🥚
+
+A Progressive Web App marketplace where local egg sellers create profile pages, list eggs with tags/photos/pricing, and buyers can browse, request orders, message sellers, and pay via Stripe Connect.
+
+## Tech Stack
+
+| Layer | Technology | Version |
+|-------|------------|---------|
+| Framework | Next.js (App Router) | 16.x |
+| React | React | 19.x |
+| Styling | Tailwind CSS | 4.x |
+| Auth | Clerk | 7.x |
+| Database | PostgreSQL + Prisma | 7.x |
+| File Storage | Vercel Blob | — |
+| Real-time | Pusher | — |
+| Payments | Stripe Connect | — |
+| Validation | Zod | 4.x |
+| Maps | Leaflet | 1.9.x |
+| Rate Limiting | Upstash Redis | — |
+| Push Notifications | Pusher Beams | — |
+
+## Prerequisites
+
+- Node.js 20+
+- PostgreSQL database (e.g. [Neon](https://neon.tech) or [Vercel Postgres](https://vercel.com/storage/postgres))
+- [Clerk](https://clerk.com) account (auth + subscriptions)
+- [Stripe](https://stripe.com) account (payments + Connect)
+- [Pusher](https://pusher.com) account (real-time messaging + Beams)
+- [Vercel Blob](https://vercel.com/storage/blob) token (image uploads)
+- Optionally: [Upstash](https://upstash.com) Redis (rate limiting)
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Clone and install
+git clone https://github.com/cwdcwd/eggbook.git
+cd eggbook
+npm install
+
+# Configure environment
+cp .env.example .env.local
+# Fill in required values (optional integrations like Upstash are noted in the file)
+
+# Set up the database
+npx prisma db push        # Push schema to database
+npm run db:seed           # Seed sample data
+
+# Start development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Available Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Production build (Prisma generate + service worker copy + Next.js build) |
+| `npm start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run db:seed` | Seed database with sample data |
+| `npm run db:cleanup` | Clean up stale data |
+| `npm run db:cleanup:dry` | Preview cleanup without deleting |
+| `npm run db:reset` | Force cleanup + reseed |
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/                    # Next.js App Router pages and API routes
+│   ├── (auth)/            # Auth pages (sign-in, sign-up)
+│   ├── [username]/        # Dynamic seller profile pages (@username)
+│   ├── admin/             # Admin dashboard (role-gated)
+│   ├── api/               # API routes
+│   ├── checkout/          # Stripe checkout flow
+│   ├── dashboard/         # Seller/buyer dashboard
+│   ├── explore/           # Search and discovery
+│   ├── favorites/         # Buyer favorites
+│   ├── messages/          # Messaging inbox
+│   └── pricing/           # Subscription plans
+├── components/            # Shared UI and feature components
+│   ├── ui/               # Base UI primitives (Button, Card, Input, Badge)
+│   ├── dashboard/        # Dashboard-specific components
+│   └── search/           # Search filters, map, results
+├── hooks/                 # Custom React hooks (Pusher subscription)
+├── lib/                   # Utilities and configurations
+│   ├── auth.ts           # Clerk auth helpers
+│   ├── db.ts             # Prisma client with pg adapter
+│   ├── stripe.ts         # Stripe configuration
+│   ├── pusher.ts         # Server-side Pusher (triggers)
+│   ├── pusher-client.ts  # Client-side Pusher (subscriptions)
+│   ├── pusher-constants.ts # Shared channel/event constants
+│   ├── subscription.ts   # Subscription lifecycle helpers
+│   ├── rate-limit.ts     # Upstash rate limiting
+│   ├── schemas.ts        # Zod validation schemas
+│   └── utils.ts          # General utilities (cn, formatPrice)
+prisma/
+└── schema.prisma          # Database schema
+public/
+├── manifest.json          # PWA manifest
+└── service-worker.js      # Pusher Beams push notification worker (copied from dependency by copy-sw)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Key Architecture Decisions
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Clerk Auth**: Users synced to local DB via webhooks. Roles: BUYER, SELLER, ADMIN. Subscriptions managed via Clerk Billing with `has({ feature })` checks.
+- **Stripe Connect**: Sellers can connect their own Stripe account (`OWN_STRIPE`) or use platform-managed payments (`PLATFORM`).
+- **Pusher Split**: Server-side (`pusher.ts`) and client-side (`pusher-client.ts`) are separate files to avoid bundling `pusher-js` on the server. Shared constants live in `pusher-constants.ts`.
+- **Prisma 7**: Uses `@prisma/adapter-pg` with a `pg` Pool (driver adapter pattern, no native engine binaries).
+- **PWA**: Installable with PWA manifest and push notifications via Pusher Beams service worker.
 
-## Deploy on Vercel
+## Environment Variables
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+See [`.env.example`](.env.example) for all required and optional variables.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Database Schema
+
+See [`docs/database-schema.md`](docs/database-schema.md) for the full schema documentation.
+
+## License
+
+Private
