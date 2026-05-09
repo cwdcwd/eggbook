@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 type Favorite = Prisma.FavoriteGetPayload<object>;
 type SellerWithRelations = Prisma.SellerProfileGetPayload<{
-  include: { user: true; listings: true };
+  include: { user: true; listings: true; _count: { select: { listings: true } } };
 }>;
 
 async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {

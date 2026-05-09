@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { Search, MapPin, Heart, MessageSquare, Grid, List, Map, Loader2, X } from "lucide-react";
+import { Search, Heart, MessageSquare, Grid, List, Map, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { SearchFilters } from "@/components/search/SearchFilters";
 import { SearchResults } from "@/components/search/SearchResults";
