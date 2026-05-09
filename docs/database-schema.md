@@ -67,7 +67,6 @@ Extended profile for sellers with location and payment settings.
 - `listings` → EggListing[]
 - `orders` → Order[] (as seller)
 - `posts` → Post[]
-- `favorites` → Favorite[] (via sellerProfileId)
 
 ---
 
@@ -343,7 +342,6 @@ erDiagram
     SellerProfile ||--o{ Order : "receives"
     SellerProfile ||--o{ Post : "publishes"
     SellerProfile ||--o{ SellerMonthlyVolume : "tracks"
-    SellerProfile ||--o{ Favorite : "favorited by"
 
     EggListing ||--o{ Order : "ordered in"
     EggListing }o--o{ Tag : "tagged with"
@@ -359,10 +357,10 @@ erDiagram
         string email UK
         UserRole role
         SubscriptionStatus subscriptionStatus
-        string subscriptionId
-        string subscriptionPlan
-        datetime subscriptionExpiresAt
-        int listingLimit
+        string subscriptionId "nullable"
+        string subscriptionPlan "nullable"
+        datetime subscriptionExpiresAt "nullable"
+        int listingLimit "nullable"
         datetime createdAt
         datetime updatedAt
     }
@@ -423,12 +421,12 @@ erDiagram
     OrderStatusHistory {
         string id PK
         string orderId FK
-        OrderStatus fromStatus
+        OrderStatus fromStatus "nullable"
         OrderStatus toStatus
-        string changedBy
+        string changedBy "nullable"
         ChangeActorType changedByType
-        string reason
-        json metadata
+        string reason "nullable"
+        json metadata "nullable"
         datetime createdAt
     }
 
