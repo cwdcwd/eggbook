@@ -19,37 +19,56 @@ async function handleCheckoutCompleted(
   if (!orderId) return;
 
   // Only transition from CONFIRMED → PAID (the expected pre-payment status)
+  // If the seller has already manually advanced the order (PAID/COMPLETED),
+  // still record Stripe payment details but don't change the status
   const existingOrder = await db.order.findUnique({
     where: { id: orderId },
-    select: { status: true },
+    select: { status: true, stripePaymentId: true },
   });
 
-  if (existingOrder?.status !== "CONFIRMED") {
-    console.log(`[stripe-webhook] Order ${orderId} status is ${existingOrder?.status}, expected CONFIRMED — skipping`);
+  if (!existingOrder) {
+    console.log(`[stripe-webhook] Order ${orderId} not found — skipping`);
     return;
   }
+
+  // Already processed this payment
+  if (existingOrder.stripePaymentId) {
+    console.log(`[stripe-webhook] Order ${orderId} already has stripePaymentId — skipping duplicate`);
+    return;
+  }
+
+  const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
+  if (!validStatuses.includes(existingOrder.status)) {
+    console.log(`[stripe-webhook] Order ${orderId} status is ${existingOrder.status}, not in ${validStatuses.join("/")} — skipping`);
+    return;
+  }
+
+  // If CONFIRMED, advance to PAID. If already PAID/COMPLETED, just record payment details.
+  const shouldAdvanceStatus = existingOrder.status === "CONFIRMED";
 
   await db.order.update({
     where: { id: orderId },
     data: {
-      status: "PAID",
+      ...(shouldAdvanceStatus && { status: "PAID" }),
       stripePaymentId: session.payment_intent as string,
       paidAt: new Date(),
     },
   });
 
-  await logOrderStatusChange({
-    orderId,
-    fromStatus: existingOrder?.status || null,
-    toStatus: "PAID",
-    changedByType: "SYSTEM",
-    reason: "Payment completed via Stripe",
-    metadata: {
-      stripeEventId: eventId,
-      stripeSessionId: session.id,
-      stripePaymentIntentId: session.payment_intent,
+  if (shouldAdvanceStatus) {
+    await logOrderStatusChange({
+      orderId,
+      fromStatus: "CONFIRMED",
+      toStatus: "PAID",
+      changedByType: "SYSTEM",
+      reason: "Payment completed via Stripe",
+      metadata: {
+        stripeEventId: eventId,
+        stripeSessionId: session.id,
+        stripePaymentIntentId: session.payment_intent,
     },
   });
+  }
 
   // Update seller's monthly volume
   const order = await db.order.findUnique({
@@ -127,30 +146,40 @@ async function handlePaymentIntentSucceeded(
   // Fallback: update order if checkout.session.completed didn't fire or was missed
   const existingOrder = await db.order.findUnique({
     where: { id: piOrderId },
-    select: { status: true },
+    select: { status: true, stripePaymentId: true },
   });
 
-  if (existingOrder && existingOrder.status === "CONFIRMED") {
+  if (!existingOrder) return;
+
+  // Already processed
+  if (existingOrder.stripePaymentId) return;
+
+  const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
+  if (existingOrder && validStatuses.includes(existingOrder.status)) {
+    const shouldAdvance = existingOrder.status === "CONFIRMED";
+
     await db.order.update({
       where: { id: piOrderId },
       data: {
-        status: "PAID",
+        ...(shouldAdvance && { status: "PAID" }),
         stripePaymentId: paymentIntent.id,
         paidAt: new Date(),
       },
     });
 
-    await logOrderStatusChange({
-      orderId: piOrderId,
-      fromStatus: "CONFIRMED",
-      toStatus: "PAID",
-      changedByType: "SYSTEM",
-      reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
-      metadata: {
-        stripeEventId: eventId,
-        stripePaymentIntentId: paymentIntent.id,
-      },
-    });
+    if (shouldAdvance) {
+      await logOrderStatusChange({
+        orderId: piOrderId,
+        fromStatus: "CONFIRMED",
+        toStatus: "PAID",
+        changedByType: "SYSTEM",
+        reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
+        metadata: {
+          stripeEventId: eventId,
+          stripePaymentIntentId: paymentIntent.id,
+        },
+      });
+    }
     console.log(`[stripe-webhook] Order ${piOrderId} updated to PAID via payment_intent fallback`);
   } else {
     console.log(`[stripe-webhook] Order ${piOrderId} status is ${existingOrder?.status}, no update needed`);
