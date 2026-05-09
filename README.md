@@ -42,7 +42,7 @@ cp .env.example .env.local
 # Fill in all values in .env.local (see .env.example for descriptions)
 
 # Set up the database
-npx prisma migrate dev   # Run migrations
+npx prisma db push        # Push schema to database
 npm run db:seed           # Seed sample data
 
 # Start development server
@@ -76,6 +76,8 @@ src/
 │   ├── checkout/          # Stripe checkout flow
 │   ├── dashboard/         # Seller/buyer dashboard
 │   ├── explore/           # Search and discovery
+│   ├── favorites/         # Buyer favorites
+│   ├── messages/          # Messaging inbox
 │   └── pricing/           # Subscription plans
 ├── components/            # Shared UI and feature components
 │   ├── ui/               # Base UI primitives (Button, Card, Input, Badge)
