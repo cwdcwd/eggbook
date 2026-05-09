@@ -346,7 +346,7 @@ erDiagram
     EggListing ||--o{ Order : "ordered in"
     EggListing }o--o{ Tag : "tagged with"
 
-    Order ||--o| Conversation : "has"
+    Order |o--o| Conversation : "has (optional)"
     Order ||--o{ OrderStatusHistory : "audit trail"
     Conversation ||--o{ Message : "contains"
 
@@ -434,7 +434,7 @@ erDiagram
         string id PK
         string buyerId FK
         string sellerId FK
-        string orderId FK
+        string orderId "FK, nullable"
     }
 
     Message {
