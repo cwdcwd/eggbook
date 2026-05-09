@@ -40,6 +40,13 @@ async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {
         where: { isAvailable: true },
         take: 1,
       },
+      _count: {
+        select: {
+          listings: {
+            where: { isAvailable: true },
+          },
+        },
+      },
     },
   });
 
@@ -123,9 +130,9 @@ export default async function FavoritesPage() {
                         </span>
                       </div>
                     )}
-                    {seller.listings.length > 0 && (
+                    {seller._count.listings > 0 && (
                       <p className="text-sm text-amber-600 mt-1">
-                        {seller.listings.length} available listing{seller.listings.length !== 1 ? "s" : ""}
+                        {seller._count.listings} available listing{seller._count.listings !== 1 ? "s" : ""}
                       </p>
                     )}
                   </div>

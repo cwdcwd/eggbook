@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
@@ -85,6 +85,7 @@ function ExploreContent() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Build search URL params
   const buildSearchParams = useCallback(() => {
@@ -130,9 +131,15 @@ function ExploreContent() {
     }
   }, [buildSearchParams]);
 
-  // Initial load and search when params change
+  // Initial load and search when params change (debounced)
   useEffect(() => {
-    fetchResults();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchResults();
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [fetchResults]);
 
   // Update URL when filters change (debounced)
@@ -290,6 +297,7 @@ function ExploreContent() {
                   type="button"
                   onClick={() => setQuery("")}
                   className="text-amber-400 hover:text-amber-600"
+                  aria-label="Clear search"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -338,6 +346,7 @@ function ExploreContent() {
               onClick={() => setView("grid")}
               className={`p-2 rounded ${view === "grid" ? "bg-amber-100 text-amber-700" : "text-amber-500 hover:text-amber-700"}`}
               title="Grid view"
+              aria-label="Grid view"
             >
               <Grid className="w-4 h-4" />
             </button>
@@ -345,6 +354,7 @@ function ExploreContent() {
               onClick={() => setView("list")}
               className={`p-2 rounded ${view === "list" ? "bg-amber-100 text-amber-700" : "text-amber-500 hover:text-amber-700"}`}
               title="List view"
+              aria-label="List view"
             >
               <List className="w-4 h-4" />
             </button>
@@ -352,6 +362,7 @@ function ExploreContent() {
               onClick={() => setView("map")}
               className={`p-2 rounded ${view === "map" ? "bg-amber-100 text-amber-700" : "text-amber-500 hover:text-amber-700"}`}
               title="Map view"
+              aria-label="Map view"
             >
               <Map className="w-4 h-4" />
             </button>
