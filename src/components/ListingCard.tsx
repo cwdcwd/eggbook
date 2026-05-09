@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { ShoppingCart } from "lucide-react";
 import { Button, Card, Badge } from "@/components/ui";
 import { formatPrice, getUnitDisplay } from "@/lib/utils";
@@ -28,6 +30,17 @@ interface ListingCardProps {
 
 export function ListingCard({ listing, seller }: ListingCardProps) {
   const [showModal, setShowModal] = useState(false);
+  const { userId } = useAuth();
+  const router = useRouter();
+
+  const handleOrderClick = () => {
+    if (!userId) {
+      const returnUrl = window.location.pathname + window.location.search;
+      router.push(`/sign-up?redirect_url=${encodeURIComponent(returnUrl)}`);
+      return;
+    }
+    setShowModal(true);
+  };
 
   return (
     <>
@@ -66,7 +79,7 @@ export function ListingCard({ listing, seller }: ListingCardProps) {
           <p className="text-sm text-amber-500 mb-4">
             {listing.stockCount} in stock
           </p>
-          <Button className="w-full" onClick={() => setShowModal(true)}>
+          <Button className="w-full" onClick={handleOrderClick}>
             <ShoppingCart className="w-4 h-4 mr-2" />
             Request Order
           </Button>

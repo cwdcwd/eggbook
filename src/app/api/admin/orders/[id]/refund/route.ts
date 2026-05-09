@@ -2,17 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { createRefund } from "@/lib/stripe";
+import { verifyAdmin } from "@/lib/auth";
+import { AdminRefundSchema } from "@/lib/schemas";
+import { logOrderStatusChange } from "@/lib/order-audit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
-}
-
-// Admin middleware helper
-async function verifyAdmin(userId: string) {
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-  });
-  return user?.role === "ADMIN";
 }
 
 // Issue a refund for an order
@@ -23,14 +18,18 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await verifyAdmin(userId);
+    const isAdmin = await verifyAdmin();
     if (!isAdmin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
     const { id } = await params;
     const body = await req.json();
-    const { amount, reason } = body; // amount in dollars, optional partial refund
+    const parsed = AdminRefundSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.flatten() }, { status: 400 });
+    }
+    const { amount, reason } = parsed.data;
 
     const order = await db.order.findUnique({
       where: { id },
@@ -63,28 +62,43 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
     // Calculate refund amount in cents
     const refundAmountCents = amount
-      ? Math.round(parseFloat(amount) * 100)
+      ? Math.round(amount * 100)
       : undefined; // undefined = full refund
 
     // Issue refund via Stripe
     const refund = await createRefund(order.stripePaymentId, refundAmountCents);
 
-    // Update order status
-    await db.order.update({
-      where: { id },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancelReason: reason || "Refund issued by admin",
-      },
-    });
+    // Update order status, restore stock, and log audit trail in one transaction
+    const cancelReason = reason || "Refund issued by admin";
+    await db.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelReason,
+        },
+      });
 
-    // Restore stock
-    await db.eggListing.update({
-      where: { id: order.listingId },
-      data: {
-        stockCount: { increment: order.quantity },
-      },
+      // Only restore stock if order wasn't already fulfilled
+      if (order.status !== "COMPLETED") {
+        await tx.eggListing.update({
+          where: { id: order.listingId },
+          data: {
+            stockCount: { increment: order.quantity },
+          },
+        });
+      }
+
+      await logOrderStatusChange({
+        orderId: id,
+        fromStatus: order.status,
+        toStatus: "CANCELLED",
+        changedBy: userId,
+        changedByType: "ADMIN",
+        reason: cancelReason,
+        tx,
+      });
     });
 
     return NextResponse.json({

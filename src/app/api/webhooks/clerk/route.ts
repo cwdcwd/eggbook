@@ -2,6 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+
 import {
   handleSubscriptionActivation,
   handleSubscriptionUpdate,
@@ -9,14 +10,15 @@ import {
 } from "@/lib/subscription";
 
 export async function POST(req: Request) {
+  const headerPayload = await headers();
+
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
   if (!WEBHOOK_SECRET) {
     throw new Error("Please add CLERK_WEBHOOK_SECRET to .env");
   }
 
-  // Get headers
-  const headerPayload = await headers();
+  // Get svix headers for verification
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
@@ -25,9 +27,8 @@ export async function POST(req: Request) {
     return new Response("Error: Missing svix headers", { status: 400 });
   }
 
-  // Get body
-  const payload = await req.json();
-  const body = JSON.stringify(payload);
+  // Get body as raw text for accurate signature verification
+  const body = await req.text();
 
   // Verify webhook
   const wh = new Webhook(WEBHOOK_SECRET);
@@ -66,17 +67,27 @@ export async function POST(req: Request) {
   }
 
   if (eventType === "user.updated") {
-    const { id, email_addresses, username } = evt.data;
+    const { id, email_addresses, username, image_url } = evt.data;
     const email = email_addresses[0]?.email_address;
 
     if (email) {
-      await db.user.update({
+      // Update user
+      const user = await db.user.update({
         where: { clerkId: id },
         data: {
           email,
           username: username || email.split("@")[0],
         },
+        include: { sellerProfile: true },
       });
+
+      // Sync Clerk avatar to seller profile only if no custom avatar set
+      if (user.sellerProfile && image_url && !user.sellerProfile.avatarUrl) {
+        await db.sellerProfile.update({
+          where: { id: user.sellerProfile.id },
+          data: { avatarUrl: image_url },
+        });
+      }
     }
   }
 

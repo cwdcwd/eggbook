@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
 import { canCreateListing } from "@/lib/subscription";
+import { CreateListingSchema } from "@/lib/schemas";
 
 // Create a new listing
 export async function POST(req: NextRequest) {
@@ -13,7 +14,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Quick DB check for subscription status and listing limits
+    // Clerk's has() is the authoritative subscription check
+    const hasListingFeature = has?.({ feature: "listing" }) ?? false;
+    if (!hasListingFeature) {
+      return NextResponse.json(
+        { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
+    }
+
+    // Ensure user exists in DB before checking limits
+    const user = await getOrCreateUser(userId);
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // DB check for listing limits only (not subscription status)
     const dbCheck = await canCreateListing(userId);
     if (!dbCheck.allowed) {
       return NextResponse.json(
@@ -22,29 +38,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify with Clerk's has() for the actual gate (authoritative check)
-    const hasListingFeature = has({ feature: "listing" });
-    if (!hasListingFeature) {
-      return NextResponse.json(
-        { error: "Seller subscription required to create listings", code: "SUBSCRIPTION_REQUIRED" },
-        { status: 403 }
-      );
-    }
-
-    // Get user with seller profile
-    const user = await getOrCreateUser(userId);
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     // Auto-create seller profile if doesn't exist (upgrade to SELLER role)
     let sellerProfile = user.sellerProfile;
     if (!sellerProfile) {
+      // Get Clerk user for avatar
+      const clerkUser = await currentUser();
+      
       sellerProfile = await db.sellerProfile.create({
         data: {
           userId: user.id,
           displayName: user.username,
+          avatarUrl: clerkUser?.imageUrl || null,
         },
       });
 
@@ -56,6 +60,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = CreateListingSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       title,
       description,
@@ -66,32 +74,7 @@ export async function POST(req: NextRequest) {
       stockCount,
       photos,
       tags,
-    } = body;
-
-    // Validate required fields
-    if (!title || title.trim() === "") {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
-
-    if (!pricePerUnit || pricePerUnit <= 0) {
-      return NextResponse.json({ error: "Valid price is required" }, { status: 400 });
-    }
-
-    // Validate unit
-    const validUnits: PricingUnit[] = ["EGG", "HALF_DOZEN", "DOZEN", "FLAT", "CUSTOM"];
-    if (!validUnits.includes(unit as PricingUnit)) {
-      return NextResponse.json({ error: "Invalid pricing unit" }, { status: 400 });
-    }
-
-    // If CUSTOM unit, require custom fields
-    if (unit === "CUSTOM") {
-      if (!customUnitName || !customUnitQty) {
-        return NextResponse.json(
-          { error: "Custom unit name and quantity required for custom pricing" },
-          { status: 400 }
-        );
-      }
-    }
+    } = parsed.data;
 
     // Handle tags - connect existing or create new ones
     const tagConnections = await Promise.all(
@@ -112,11 +95,11 @@ export async function POST(req: NextRequest) {
         sellerId: sellerProfile.id,
         title: title.trim(),
         description: description?.trim() || null,
-        pricePerUnit: parseFloat(pricePerUnit),
+        pricePerUnit,
         unit: unit as PricingUnit,
-        customUnitName: unit === "CUSTOM" ? customUnitName : null,
-        customUnitQty: unit === "CUSTOM" ? parseInt(customUnitQty) : null,
-        stockCount: parseInt(stockCount) || 0,
+        customUnitName: unit === "CUSTOM" ? customUnitName ?? null : null,
+        customUnitQty: unit === "CUSTOM" ? customUnitQty ?? null : null,
+        stockCount: stockCount || 0,
         photos: photos || [],
         tags: {
           connect: tagConnections,

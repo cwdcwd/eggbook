@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
+import { AddFavoriteSchema } from "@/lib/schemas";
 
 // Add a seller to favorites
 export async function POST(req: NextRequest) {
@@ -17,11 +18,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { sellerProfileId } = body;
-
-    if (!sellerProfileId) {
-      return NextResponse.json({ error: "Seller profile ID required" }, { status: 400 });
+    const parsed = AddFavoriteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
     }
+    const { sellerProfileId } = parsed.data;
 
     // Check if seller profile exists
     const sellerProfile = await db.sellerProfile.findUnique({

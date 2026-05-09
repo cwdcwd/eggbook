@@ -7,9 +7,18 @@ import { createConnectAccount, createAccountLink, getAccountStatus } from "@/lib
 // Start Stripe Connect onboarding
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Clerk's has() is the authoritative subscription check for Stripe onboarding
+    const hasListingFeature = has?.({ feature: "listing" }) ?? false;
+    if (!hasListingFeature) {
+      return NextResponse.json(
+        { error: "Seller subscription required to set up payments", code: "SUBSCRIPTION_REQUIRED" },
+        { status: 403 }
+      );
     }
 
     const user = await getOrCreateUser(userId);
@@ -25,7 +34,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!baseUrl) {
+      return NextResponse.json(
+        { error: "Server configuration error: NEXT_PUBLIC_APP_URL not set" },
+        { status: 500 }
+      );
+    }
     let stripeAccountId = user.sellerProfile.stripeAccountId;
 
     // Create Stripe account if doesn't exist
@@ -33,10 +48,16 @@ export async function POST(req: NextRequest) {
       const account = await createConnectAccount(user.email);
       stripeAccountId = account.id;
 
-      // Save Stripe account ID
+      // Save Stripe account ID and persist payment method choice
       await db.sellerProfile.update({
         where: { id: user.sellerProfile.id },
-        data: { stripeAccountId },
+        data: { stripeAccountId, paymentMethod: "OWN_STRIPE" },
+      });
+    } else {
+      // Account exists but ensure payment method is persisted
+      await db.sellerProfile.update({
+        where: { id: user.sellerProfile.id },
+        data: { paymentMethod: "OWN_STRIPE" },
       });
     }
 

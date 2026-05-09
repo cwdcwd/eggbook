@@ -1,9 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { OrderStatus } from "@prisma/client";
 import { calculatePlatformFee, calculateFeeTier } from "@/lib/utils";
 import { triggerNewOrder } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
+import { logOrderStatusChange } from "@/lib/order-audit";
+import { CreateOrderSchema, OrderStatusParam } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -13,13 +18,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
+
     const body = await req.json();
-    const { listingId, quantity, fulfillmentType, pickupTime, deliveryAddress, deliveryLat, deliveryLng } = body;
+    const parsed = CreateOrderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { listingId, quantity, fulfillmentType, pickupTime, deliveryAddress, deliveryLat, deliveryLng } = parsed.data;
 
     // Get the listing
     const listing = await db.eggListing.findUnique({
       where: { id: listingId },
-      include: { seller: true },
+      include: { seller: { include: { user: true } } },
     });
 
     if (!listing) {
@@ -55,29 +67,64 @@ export async function POST(req: NextRequest) {
     const { feePercent } = calculateFeeTier(volume?.totalSales || 0);
     const platformFee = calculatePlatformFee(totalPrice, feePercent);
 
-    // Create order
-    const order = await db.order.create({
-      data: {
-        buyerId: buyer.id,
-        sellerId: listing.sellerId,
-        listingId: listing.id,
-        quantity,
-        totalPrice,
-        platformFee,
-        fulfillmentType,
-        pickupTime: pickupTime ? new Date(pickupTime) : null,
-        deliveryAddress,
-        deliveryLat,
-        deliveryLng,
-      },
-      include: {
-        listing: true,
-        buyer: true,
-      },
+    // Create order and decrement stock in a transaction (with atomic check)
+    const order = await db.$transaction(async (tx) => {
+      // Atomically decrement stock only if sufficient quantity exists
+      const updateResult = await tx.eggListing.updateMany({
+        where: {
+          id: listingId,
+          stockCount: { gte: quantity },
+          isAvailable: true,
+        },
+        data: {
+          stockCount: { decrement: quantity },
+        },
+      });
+
+      // Verify stock was actually decremented (handles race condition)
+      if (updateResult.count === 0) {
+        throw new Error("INSUFFICIENT_STOCK");
+      }
+
+      // Create order (auto-confirm if seller has autoAcceptOrders enabled)
+      const initialStatus = listing.seller.autoAcceptOrders ? "CONFIRMED" : "PENDING";
+      const newOrder = await tx.order.create({
+        data: {
+          buyerId: buyer.id,
+          sellerId: listing.sellerId,
+          listingId: listing.id,
+          quantity,
+          totalPrice,
+          platformFee,
+          fulfillmentType,
+          status: initialStatus,
+          pickupTime: pickupTime ? new Date(pickupTime) : null,
+          deliveryAddress,
+          deliveryLat,
+          deliveryLng,
+        },
+        include: {
+          listing: true,
+          buyer: true,
+        },
+      });
+
+      // Log initial status to audit trail
+      await logOrderStatusChange({
+        orderId: newOrder.id,
+        fromStatus: null,
+        toStatus: initialStatus,
+        changedBy: userId,
+        changedByType: "BUYER",
+        reason: listing.seller.autoAcceptOrders ? "Auto-accepted by seller settings" : null,
+        tx,
+      });
+
+      return newOrder;
     });
 
-    // Notify seller via Pusher
-    await triggerNewOrder(listing.seller.userId, {
+    // Notify seller via Pusher (use clerkId for channel subscription)
+    await triggerNewOrder(listing.seller.user.clerkId, {
       id: order.id,
       buyerName: buyer.username,
       listingTitle: listing.title,
@@ -85,8 +132,21 @@ export async function POST(req: NextRequest) {
       totalPrice,
     });
 
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(listing.seller.user.clerkId, {
+        title: "New Order",
+        body: `${buyer.username} ordered ${quantity}× ${listing.title}`,
+        deepLink: `/dashboard/orders`,
+      });
+    });
+
     return NextResponse.json(order);
   } catch (error) {
+    // Handle race condition error gracefully
+    if (error instanceof Error && error.message === "INSUFFICIENT_STOCK") {
+      return NextResponse.json({ error: "Not enough stock" }, { status: 400 });
+    }
     console.error("Error creating order:", error);
     return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
   }
@@ -113,6 +173,36 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const role = searchParams.get("role") || "buyer"; // buyer or seller
     const status = searchParams.get("status");
+    const uncompleted = searchParams.get("uncompleted") === "true";
+
+    // Build status filter - orders that still need action (not completed, cancelled, or declined)
+    const uncompletedStatuses: OrderStatus[] = [
+      OrderStatus.PENDING,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PAID,
+    ];
+
+    const getStatusFilter = () => {
+      if (uncompleted) {
+        return { status: { in: uncompletedStatuses } };
+      }
+      if (status) {
+        const parsed = OrderStatusParam.safeParse(status);
+        if (!parsed.success) {
+          return null; // Signal invalid status
+        }
+        return { status: parsed.data as OrderStatus };
+      }
+      return {};
+    };
+
+    const statusFilter = getStatusFilter();
+    if (statusFilter === null) {
+      return NextResponse.json(
+        { error: "Invalid status parameter" },
+        { status: 400 }
+      );
+    }
 
     let orders;
 
@@ -120,7 +210,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           sellerId: user.sellerProfile.id,
-          ...(status && { status: status as any }),
+          ...statusFilter,
         },
         include: {
           listing: true,
@@ -132,7 +222,7 @@ export async function GET(req: NextRequest) {
       orders = await db.order.findMany({
         where: {
           buyerId: user.id,
-          ...(status && { status: status as any }),
+          ...statusFilter,
         },
         include: {
           listing: true,

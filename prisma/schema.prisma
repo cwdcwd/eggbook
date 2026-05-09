@@ -66,6 +66,7 @@ model SellerProfile {
   pickupType          PickupType    @default(ARRANGED)
   pickupHours         Json?         // JSON object with day/time slots
   isActive            Boolean       @default(true)
+  autoAcceptOrders    Boolean       @default(true) // Auto-confirm orders (false = manual confirmation required)
   paymentMethod       PaymentMethod @default(PLATFORM)
   stripeAccountId     String?       // Stripe Connect account (only for OWN_STRIPE)
   stripeOnboarded     Boolean       @default(false)
@@ -152,7 +153,31 @@ model Order {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  conversation Conversation?
+  conversation   Conversation?
+  statusHistory  OrderStatusHistory[]
+}
+
+// Audit trail for order status changes
+model OrderStatusHistory {
+  id           String      @id @default(cuid())
+  orderId      String
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus   OrderStatus?  // null for initial creation
+  toStatus     OrderStatus
+  changedBy    String?       // clerkId of user, or null for system/webhook
+  changedByType ChangeActorType @default(SYSTEM)
+  reason       String?       // e.g., cancel reason, payment ID
+  metadata     Json?         // Additional context (e.g., stripeEventId)
+  createdAt    DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+enum ChangeActorType {
+  BUYER
+  SELLER
+  ADMIN
+  SYSTEM  // webhooks, automated processes
 }
 
 enum OrderStatus {

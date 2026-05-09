@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { OrderStatus } from "@prisma/client";
+import { logOrderStatusChange } from "@/lib/order-audit";
+import { triggerOrderUpdate } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
+import { OrderActionSchema } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -92,7 +96,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json();
-    const { action, cancelReason } = body;
+    const parsed = OrderActionSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { action, cancelReason } = parsed.data;
 
     const isBuyer = order.buyerId === user.id;
     const isSeller = user.sellerProfile?.id === order.sellerId;
@@ -102,7 +110,8 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       confirm: { fromStatus: ["PENDING"], toStatus: "CONFIRMED", allowedBy: "seller" },
       decline: { fromStatus: ["PENDING"], toStatus: "DECLINED", allowedBy: "seller" },
       cancel: { fromStatus: ["PENDING", "CONFIRMED"], toStatus: "CANCELLED", allowedBy: "both" },
-      complete: { fromStatus: ["PAID"], toStatus: "COMPLETED", allowedBy: "seller" },
+      markPaid: { fromStatus: ["CONFIRMED"], toStatus: "PAID", allowedBy: "seller" }, // Manual payment (cash, Venmo, etc.)
+      complete: { fromStatus: ["PAID", "CONFIRMED"], toStatus: "COMPLETED", allowedBy: "seller" }, // Can complete directly from CONFIRMED if paid externally
     };
 
     const transition = transitions[action];
@@ -128,31 +137,106 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Update order
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: {
-        status: transition.toStatus,
-        ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
-        ...(action === "decline" && { cancelReason }),
-        ...(action === "complete" && { completedAt: new Date() }),
-      },
-      include: {
-        listing: true,
-        buyer: true,
-        seller: { include: { user: true } },
-      },
-    });
+    // Determine actor type
+    const actorType = isSeller ? "SELLER" : "BUYER";
 
-    // If declined or cancelled, restore stock
-    if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
-      await db.eggListing.update({
-        where: { id: order.listingId },
+    // Update order and log status change in transaction
+    const updatedOrder = await db.$transaction(async (tx) => {
+      // Re-read inside transaction to get current state (guards against concurrent webhook updates)
+      const current = await tx.order.findUniqueOrThrow({
+        where: { id },
+        select: { paidAt: true, status: true },
+      });
+
+      const updated = await tx.order.update({
+        where: { id },
         data: {
-          stockCount: { increment: order.quantity },
+          status: transition.toStatus,
+          ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
+          ...(action === "decline" && { cancelReason }),
+          ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
+          ...(action === "complete" && { completedAt: new Date(), ...(!current.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
+        },
+        include: {
+          listing: true,
+          buyer: true,
+          seller: { include: { user: true } },
         },
       });
-    }
+
+      // If declined or cancelled, restore stock
+      if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
+        await tx.eggListing.update({
+          where: { id: order.listingId },
+          data: {
+            stockCount: { increment: order.quantity },
+          },
+        });
+      }
+
+      // Log status change to audit trail
+      const auditReason = (() => {
+        if (cancelReason) return cancelReason;
+        if (action === "markPaid") return "Marked as paid (external payment)";
+        if (action === "complete" && current.status === "CONFIRMED") return "Completed with external payment";
+        return null;
+      })();
+
+      await logOrderStatusChange({
+        orderId: id,
+        fromStatus: current.status,
+        toStatus: transition.toStatus,
+        changedBy: userId,
+        changedByType: actorType,
+        reason: auditReason,
+        tx,
+      });
+
+      return updated;
+    });
+
+    // Notify both buyer and seller about the status change
+    const buyerUserId = updatedOrder.buyer.clerkId;
+    const sellerUserId = updatedOrder.seller.user.clerkId;
+
+    const actionLabels: Record<string, string> = {
+      confirm: "confirmed",
+      decline: "declined",
+      cancel: "cancelled",
+      complete: "completed",
+      markPaid: "marked as paid",
+    };
+    const actionLabel = actionLabels[action] || updatedOrder.status.toLowerCase();
+
+    await Promise.all([
+      triggerOrderUpdate(buyerUserId, {
+        orderId: updatedOrder.id,
+        status: updatedOrder.status,
+        message: `Order ${actionLabel}`,
+      }),
+      triggerOrderUpdate(sellerUserId, {
+        orderId: updatedOrder.id,
+        status: updatedOrder.status,
+        message: `Order ${actionLabel}`,
+      }),
+    ]);
+
+    // Push notifications via Beams (runs after response is sent)
+    const statusLabel = updatedOrder.status.charAt(0) + updatedOrder.status.slice(1).toLowerCase();
+    after(async () => {
+      await Promise.all([
+        notifyUser(buyerUserId, {
+          title: `Order ${statusLabel}`,
+          body: `Your order #${updatedOrder.id.slice(-6)} has been ${statusLabel.toLowerCase()}`,
+          deepLink: `/dashboard/orders`,
+        }),
+        notifyUser(sellerUserId, {
+          title: `Order ${statusLabel}`,
+          body: `Order #${updatedOrder.id.slice(-6)} is now ${statusLabel.toLowerCase()}`,
+          deepLink: `/dashboard/orders`,
+        }),
+      ]);
+    });
 
     return NextResponse.json(updatedOrder);
   } catch (error) {

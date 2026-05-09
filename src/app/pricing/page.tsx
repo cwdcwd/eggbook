@@ -38,7 +38,7 @@ export default function PricingPage() {
 
         {/* Clerk Pricing Table */}
         <div className="bg-white rounded-2xl shadow-lg p-8 border border-amber-100">
-          <PricingTable />
+          <PricingTable newSubscriptionRedirectUrl="/dashboard/listings" />
         </div>
 
         {/* FAQ Section */}

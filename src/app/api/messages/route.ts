@@ -1,8 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { triggerNewMessage } from "@/lib/pusher";
+import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
+import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
+import { SendMessageSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Send a message
 export async function POST(req: NextRequest) {
@@ -12,8 +15,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const rl = await rateLimit(userId, "message");
+    if (!rl.success) return rl.response;
+
     const body = await req.json();
-    const { conversationId, content, recipientId } = body;
+    const parsed = SendMessageSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+    const { conversationId, content, recipientId } = parsed.data;
 
     const user = await getOrCreateUser(userId);
 
@@ -24,9 +34,10 @@ export async function POST(req: NextRequest) {
     let conversation;
 
     if (conversationId) {
-      // Use existing conversation
+      // Use existing conversation (include buyer/seller for push notification clerkId)
       conversation = await db.conversation.findUnique({
         where: { id: conversationId },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -46,6 +57,7 @@ export async function POST(req: NextRequest) {
             { buyerId: recipientId, sellerId: user.id },
           ],
         },
+        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
       });
 
       if (!conversation) {
@@ -67,6 +79,7 @@ export async function POST(req: NextRequest) {
             buyerId: isBuyer ? user.id : recipientId,
             sellerId: isBuyer ? recipientId : user.id,
           },
+          include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
         });
       }
     } else {
@@ -100,6 +113,33 @@ export async function POST(req: NextRequest) {
       content: message.content,
       senderId: message.senderId,
       createdAt: message.createdAt,
+      sender: {
+        id: message.sender.id,
+        username: message.sender.username,
+      },
+    });
+
+    // Notify the recipient about the new message (for unread badge)
+    const recipientUserId = conversation.buyerId === user.id 
+      ? conversation.sellerId 
+      : conversation.buyerId;
+    await triggerUserNewMessage(recipientUserId, {
+      conversationId: conversation.id,
+      senderId: user.id,
+      senderUsername: user.username,
+    });
+
+    // Push notification via Beams (clerkId included from conversation query)
+    const recipientClerkId = conversation.buyerId === user.id
+      ? conversation.seller.clerkId
+      : conversation.buyer.clerkId;
+    // Push notification via Beams (runs after response is sent)
+    after(async () => {
+      await notifyUser(recipientClerkId, {
+        title: `New message from ${user.username}`,
+        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+        deepLink: `/dashboard/messages`,
+      });
     });
 
     return NextResponse.json(message);
@@ -150,14 +190,31 @@ export async function GET(req: NextRequest) {
       }
 
       // Mark messages as read
-      await db.message.updateMany({
+      const unreadMessages = await db.message.findMany({
         where: {
           conversationId,
           senderId: { not: user.id },
           read: false,
         },
-        data: { read: true },
+        select: { senderId: true },
       });
+
+      if (unreadMessages.length > 0) {
+        await db.message.updateMany({
+          where: {
+            conversationId,
+            senderId: { not: user.id },
+            read: false,
+          },
+          data: { read: true },
+        });
+
+        // Notify senders that their messages were read
+        const senderIds = [...new Set(unreadMessages.map(m => m.senderId))];
+        for (const senderId of senderIds) {
+          await triggerMessagesRead(senderId, conversationId);
+        }
+      }
 
       return NextResponse.json(conversation);
     } else {
@@ -187,7 +244,8 @@ export async function GET(req: NextRequest) {
         orderBy: { updatedAt: "desc" },
       });
 
-      return NextResponse.json(conversations);
+      // Include userId for Pusher subscription
+      return NextResponse.json({ conversations, userId: user.id });
     }
   } catch (error) {
     console.error("Error fetching messages:", error);

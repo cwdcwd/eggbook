@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { Heart, MessageSquare, Share2 } from "lucide-react";
 import { Button } from "@/components/ui";
 
@@ -19,11 +20,16 @@ export function SellerActionButtons({
   isFavorited = false,
 }: SellerActionButtonsProps) {
   const router = useRouter();
+  const { userId } = useAuth();
   const [favorited, setFavorited] = useState(isFavorited);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleMessage = async () => {
-    // Navigate to messages with this seller
+    if (!userId) {
+      const returnUrl = window.location.pathname + window.location.search;
+      router.push(`/sign-up?redirect_url=${encodeURIComponent(returnUrl)}`);
+      return;
+    }
     router.push(`/messages?recipient=${sellerUserId}`);
   };
 
@@ -46,7 +52,8 @@ export function SellerActionButtons({
         if (res.ok) {
           setFavorited(true);
         } else if (res.status === 401) {
-          router.push("/sign-in");
+          const returnUrl = window.location.pathname + window.location.search;
+          router.push(`/sign-up?redirect_url=${encodeURIComponent(returnUrl)}`);
         }
       }
     } catch (error) {

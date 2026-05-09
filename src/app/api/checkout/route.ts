@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { createCheckoutSession } from "@/lib/stripe";
 import { getOrCreateUser } from "@/lib/auth";
+import { CheckoutSchema } from "@/lib/schemas";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,11 +13,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { orderId } = body;
-
-    if (!orderId) {
-      return NextResponse.json({ error: "Order ID required" }, { status: 400 });
+    const parsed = CheckoutSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
     }
+    const { orderId } = parsed.data;
 
     // Get user
     const user = await getOrCreateUser(userId);
@@ -51,25 +52,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check seller has Stripe connected
-    if (!order.seller.stripeAccountId || !order.seller.stripeOnboarded) {
+    // Create Stripe checkout session
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!baseUrl) {
       return NextResponse.json(
-        { error: "Seller has not completed payment setup" },
-        { status: 400 }
+        { error: "Server configuration error: NEXT_PUBLIC_APP_URL not set" },
+        { status: 500 }
       );
     }
-
-    // Create Stripe checkout session
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const amountInCents = Math.round(order.totalPrice * 100);
     const platformFeeInCents = Math.round(order.platformFee * 100);
+
+    // Use seller's Stripe account if Connect is enabled and they're onboarded
+    // Falls back to direct payment in createCheckoutSession if seller lacks capabilities
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED !== 'false'
+    const sellerAccount = connectEnabled && order.seller.stripeOnboarded 
+      ? order.seller.stripeAccountId 
+      : null;
 
     const session = await createCheckoutSession(
       order.id,
       amountInCents,
-      order.seller.stripeAccountId,
+      sellerAccount,
       platformFeeInCents,
-      `${baseUrl}/checkout/${order.id}/success`,
+      `${baseUrl}/checkout/${order.id}/success?session_id={CHECKOUT_SESSION_ID}`,
       `${baseUrl}/checkout/${order.id}`
     );
 

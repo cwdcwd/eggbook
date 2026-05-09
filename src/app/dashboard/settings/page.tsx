@@ -2,8 +2,10 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import Link from "next/link";
 import { Button, Input, Card, CardHeader, CardTitle, CardContent, Badge } from "@/components/ui";
-import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X } from "lucide-react";
+import { MapPin, CreditCard, Clock, Save, Check, AlertCircle, Loader2, Upload, X, ShoppingCart, Lock } from "lucide-react";
 
 const PICKUP_TYPES = [
   { value: "TIMESLOT", label: "Specific Time Slots", description: "Buyers select from your available time slots" },
@@ -13,6 +15,9 @@ const PICKUP_TYPES = [
 
 function SettingsContent() {
   const searchParams = useSearchParams();
+  const { has } = useAuth();
+  const hasSellerSubscription = has?.({ feature: "listing" }) ?? false;
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -37,6 +42,7 @@ function SettingsContent() {
     maxDeliveryDistance: "",
     pickupType: "ARRANGED",
     paymentMethod: "PLATFORM",
+    autoAcceptOrders: true,
   });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -75,6 +81,7 @@ function SettingsContent() {
         const res = await fetch("/api/settings");
         if (res.ok) {
           const data = await res.json();
+          
           if (data.sellerProfile) {
             setProfile({
               displayName: data.sellerProfile.displayName || "",
@@ -87,6 +94,7 @@ function SettingsContent() {
               maxDeliveryDistance: data.sellerProfile.maxDeliveryDistance?.toString() || "",
               pickupType: data.sellerProfile.pickupType || "ARRANGED",
               paymentMethod: data.sellerProfile.paymentMethod || "PLATFORM",
+              autoAcceptOrders: data.sellerProfile.autoAcceptOrders ?? true,
             });
           }
         }
@@ -111,7 +119,8 @@ function SettingsContent() {
     const stripeParam = searchParams.get("stripe");
     if (stripeParam === "success") {
       setMessage({ type: "success", text: "Stripe account connected successfully!" });
-      // Refresh Stripe status
+      // Reflect persisted payment method and refresh Stripe status
+      setProfile((prev) => ({ ...prev, paymentMethod: "OWN_STRIPE" }));
       fetch("/api/stripe").then(res => res.json()).then(setStripeStatus);
     } else if (stripeParam === "refresh") {
       setMessage({ type: "error", text: "Stripe setup incomplete. Please try again." });
@@ -333,22 +342,82 @@ function SettingsContent() {
         </CardContent>
       </Card>
 
-      {/* Pickup Preferences */}
-      <Card>
+      {/* Order Preferences */}
+      <Card className={!hasSellerSubscription ? "opacity-60" : ""}>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-amber-500" />
-            <CardTitle>Pickup Preferences</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-amber-500" />
+              <CardTitle>Order Preferences</CardTitle>
+            </div>
+            {!hasSellerSubscription && (
+              <div className="flex items-center gap-2 text-amber-600">
+                <Lock className="w-4 h-4" />
+                <Link href="/pricing" className="text-sm underline hover:text-amber-800">
+                  Requires subscription
+                </Link>
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label
+            className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors ${
+              !hasSellerSubscription 
+                ? "cursor-not-allowed opacity-70 border-amber-200"
+                : profile.autoAcceptOrders
+                  ? "cursor-pointer border-amber-500 bg-amber-50"
+                  : "cursor-pointer border-amber-200 hover:border-amber-300"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={profile.autoAcceptOrders}
+              onChange={(e) =>
+                setProfile((prev) => ({ ...prev, autoAcceptOrders: e.target.checked }))
+              }
+              disabled={!hasSellerSubscription}
+              className="mt-1 w-5 h-5 text-amber-500 rounded border-amber-300 focus:ring-amber-500 disabled:opacity-50"
+            />
+            <div>
+              <p className="font-medium text-amber-900">Auto-Accept Orders</p>
+              <p className="text-sm text-amber-600">
+                Automatically confirm incoming orders so buyers can pay immediately. 
+                If disabled, you&apos;ll need to manually confirm each order before buyers can checkout.
+              </p>
+            </div>
+          </label>
+        </CardContent>
+      </Card>
+
+      {/* Pickup Preferences */}
+      <Card className={!hasSellerSubscription ? "opacity-60" : ""}>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-500" />
+              <CardTitle>Pickup Preferences</CardTitle>
+            </div>
+            {!hasSellerSubscription && (
+              <div className="flex items-center gap-2 text-amber-600">
+                <Lock className="w-4 h-4" />
+                <Link href="/pricing" className="text-sm underline hover:text-amber-800">
+                  Requires subscription
+                </Link>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {PICKUP_TYPES.map((type) => (
             <label
               key={type.value}
-              className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
-                profile.pickupType === type.value
-                  ? "border-amber-500 bg-amber-50"
-                  : "border-amber-200 hover:border-amber-300"
+              className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors ${
+                !hasSellerSubscription
+                  ? "cursor-not-allowed opacity-70 border-amber-200"
+                  : profile.pickupType === type.value
+                    ? "cursor-pointer border-amber-500 bg-amber-50"
+                    : "cursor-pointer border-amber-200 hover:border-amber-300"
               }`}
             >
               <input
@@ -359,7 +428,8 @@ function SettingsContent() {
                 onChange={(e) =>
                   setProfile((prev) => ({ ...prev, pickupType: e.target.value }))
                 }
-                className="mt-1"
+                disabled={!hasSellerSubscription}
+                className="mt-1 disabled:opacity-50"
               />
               <div>
                 <p className="font-medium text-amber-900">{type.label}</p>
@@ -371,21 +441,33 @@ function SettingsContent() {
       </Card>
 
       {/* Stripe Connect */}
-      <Card>
+      <Card className={!hasSellerSubscription ? "opacity-60" : ""}>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-amber-500" />
-            <CardTitle>Payment Setup</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-amber-500" />
+              <CardTitle>Payment Setup</CardTitle>
+            </div>
+            {!hasSellerSubscription && (
+              <div className="flex items-center gap-2 text-amber-600">
+                <Lock className="w-4 h-4" />
+                <Link href="/pricing" className="text-sm underline hover:text-amber-800">
+                  Requires subscription
+                </Link>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Payment Method Selection */}
           <div className="space-y-4">
             <label
-              className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
-                profile.paymentMethod === "PLATFORM"
-                  ? "border-amber-500 bg-amber-50"
-                  : "border-amber-200 hover:border-amber-300"
+              className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors ${
+                !hasSellerSubscription
+                  ? "cursor-not-allowed opacity-70 border-amber-200"
+                  : profile.paymentMethod === "PLATFORM"
+                    ? "cursor-pointer border-amber-500 bg-amber-50"
+                    : "cursor-pointer border-amber-200 hover:border-amber-300"
               }`}
             >
               <input
@@ -396,7 +478,8 @@ function SettingsContent() {
                 onChange={(e) =>
                   setProfile((prev) => ({ ...prev, paymentMethod: e.target.value }))
                 }
-                className="mt-1"
+                disabled={!hasSellerSubscription}
+                className="mt-1 disabled:opacity-50"
               />
               <div>
                 <p className="font-medium text-amber-900">Eggbook Handles Payments</p>
@@ -406,10 +489,12 @@ function SettingsContent() {
               </div>
             </label>
             <label
-              className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
-                profile.paymentMethod === "OWN_STRIPE"
-                  ? "border-amber-500 bg-amber-50"
-                  : "border-amber-200 hover:border-amber-300"
+              className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors ${
+                !hasSellerSubscription
+                  ? "cursor-not-allowed opacity-70 border-amber-200"
+                  : profile.paymentMethod === "OWN_STRIPE"
+                    ? "cursor-pointer border-amber-500 bg-amber-50"
+                    : "cursor-pointer border-amber-200 hover:border-amber-300"
               }`}
             >
               <input
@@ -420,7 +505,8 @@ function SettingsContent() {
                 onChange={(e) =>
                   setProfile((prev) => ({ ...prev, paymentMethod: e.target.value }))
                 }
-                className="mt-1"
+                disabled={!hasSellerSubscription}
+                className="mt-1 disabled:opacity-50"
               />
               <div>
                 <p className="font-medium text-amber-900">Connect Your Own Stripe</p>
@@ -431,8 +517,8 @@ function SettingsContent() {
             </label>
           </div>
 
-          {/* Stripe Connect UI (only shown if OWN_STRIPE selected) */}
-          {profile.paymentMethod === "OWN_STRIPE" && (
+          {/* Stripe Connect UI (only shown if OWN_STRIPE selected and has subscription) */}
+          {profile.paymentMethod === "OWN_STRIPE" && hasSellerSubscription && (
             <div className="pt-4 border-t border-amber-200">
               {stripeStatus.onboarded ? (
                 <div className="flex items-center justify-between">

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { Send, ArrowLeft, User, Heart, Search, Home } from "lucide-react";
-import { Button, Input, Card } from "@/components/ui";
+import { Send, ArrowLeft, User, Heart, Search, Loader2 } from "lucide-react";
+import { Button, Input } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
-import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher";
+import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher-client";
 
 interface Message {
   id: string;
@@ -29,14 +30,89 @@ interface Conversation {
   _count?: { messages: number };
 }
 
-export default function MessagesPage() {
+function MessagesPageContent() {
   const { user } = useUser();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const orderId = searchParams.get("order");
+  
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isStartingConversation, setIsStartingConversation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const orderProcessedRef = useRef<string | null>(null);
+
+  // Handle order-based conversation start
+  const startConversationFromOrder = useCallback(async (orderIdParam: string) => {
+    if (orderProcessedRef.current === orderIdParam) return;
+    orderProcessedRef.current = orderIdParam;
+    
+    setIsStartingConversation(true);
+    try {
+      // Fetch order to get the other party's info
+      const orderRes = await fetch(`/api/orders/${orderIdParam}`);
+      if (!orderRes.ok) {
+        console.error("Failed to fetch order");
+        router.replace("/messages");
+        return;
+      }
+      const order = await orderRes.json();
+      
+      // Get current user's DB ID
+      const settingsRes = await fetch("/api/settings");
+      if (!settingsRes.ok) {
+        console.error("Failed to fetch user settings");
+        router.replace("/messages");
+        return;
+      }
+      const settings = await settingsRes.json();
+      const currentUserId = settings.user.id;
+      
+      // Determine other party (if I'm the buyer, message the seller; if I'm the seller, message the buyer)
+      const isBuyer = order.buyerId === currentUserId;
+      const recipientId = isBuyer ? order.seller.userId : order.buyerId;
+      
+      // Send a placeholder message to create/get conversation
+      // We'll use the API which finds or creates conversation based on recipientId
+      const msgRes = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientId,
+          content: `Hi! I'm messaging about order #${orderIdParam.slice(-6)} for ${order.listing.title}.`,
+        }),
+      });
+      
+      if (msgRes.ok) {
+        // Refresh conversations and select the new one
+        const convoRes = await fetch("/api/messages");
+        if (convoRes.ok) {
+          const data = await convoRes.json();
+          const convos = data.conversations || data;
+          setConversations(Array.isArray(convos) ? convos : []);
+          
+          // Find the conversation with the recipient
+          const targetConvo = convos.find((c: Conversation) => 
+            c.buyerId === recipientId || c.sellerId === recipientId
+          );
+          if (targetConvo) {
+            setSelectedConversation(targetConvo);
+          }
+        }
+      }
+      
+      // Clear the order param from URL
+      router.replace("/messages");
+    } catch (error) {
+      console.error("Error starting conversation from order:", error);
+      router.replace("/messages");
+    } finally {
+      setIsStartingConversation(false);
+    }
+  }, [router]);
 
   // Fetch conversations
   useEffect(() => {
@@ -50,8 +126,9 @@ export default function MessagesPage() {
           return;
         }
         const data = await res.json();
+        const convos = data.conversations || data;
         // Ensure data is an array
-        setConversations(Array.isArray(data) ? data : []);
+        setConversations(Array.isArray(convos) ? convos : []);
       } catch (error) {
         console.error("Error fetching conversations:", error);
         setConversations([]);
@@ -62,6 +139,13 @@ export default function MessagesPage() {
 
     fetchConversations();
   }, []);
+
+  // Handle order parameter to start conversation
+  useEffect(() => {
+    if (orderId && !isLoading) {
+      startConversationFromOrder(orderId);
+    }
+  }, [orderId, isLoading, startConversationFromOrder]);
 
   // Fetch messages when conversation is selected
   useEffect(() => {
@@ -96,7 +180,9 @@ export default function MessagesPage() {
     const channel = pusher.subscribe(CHANNELS.conversation(selectedConversation.id));
 
     channel.bind(EVENTS.NEW_MESSAGE, (message: Message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) =>
+        prev.some((m) => m.id === message.id) ? prev : [...prev, message]
+      );
     });
 
     return () => {
@@ -125,6 +211,13 @@ export default function MessagesPage() {
       });
 
       if (res.ok) {
+        const sentMessage = await res.json();
+        // Optimistically add message to state (deduplicate if Pusher delivers it too)
+        setMessages((prev) =>
+          prev.some((m) => m.id === sentMessage.id)
+            ? prev
+            : [...prev, sentMessage]
+        );
         setNewMessage("");
       }
     } catch (error) {
@@ -138,10 +231,13 @@ export default function MessagesPage() {
     return conv.buyer.username === user.username ? conv.seller : conv.buyer;
   };
 
-  if (isLoading) {
+  if (isLoading || isStartingConversation) {
     return (
-      <div className="min-h-screen bg-amber-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500" />
+      <div className="min-h-screen bg-amber-50 flex items-center justify-center flex-col gap-4">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+        {isStartingConversation && (
+          <p className="text-amber-600">Starting conversation...</p>
+        )}
       </div>
     );
   }
@@ -257,7 +353,7 @@ export default function MessagesPage() {
                 {/* Messages */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   {messages.map((message) => {
-                    const isOwnMessage = message.sender.username === user?.username;
+                    const isOwnMessage = message.sender?.username === user?.username;
                     return (
                       <div
                         key={message.id}
@@ -312,5 +408,17 @@ export default function MessagesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-[calc(100vh-12rem)]">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+      </div>
+    }>
+      <MessagesPageContent />
+    </Suspense>
   );
 }

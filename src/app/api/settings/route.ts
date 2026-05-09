@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { PickupType, PaymentMethod } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
+import { UpdateSettingsSchema } from "@/lib/schemas";
+
+// Allowed URL patterns for avatar sync (SSRF protection)
+const ALLOWED_AVATAR_PATTERNS = [
+  /^https:\/\/[a-z0-9-]+\.blob\.vercel-storage\.com\/.+$/i, // Vercel Blob
+  /^https:\/\/images\.clerk\.dev\/.+$/i, // Clerk images
+  /^https:\/\/img\.clerk\.com\/.+$/i, // Clerk images (alternate)
+];
+
+function isAllowedAvatarUrl(url: string): boolean {
+  return ALLOWED_AVATAR_PATTERNS.some((pattern) => pattern.test(url));
+}
 
 // Get current user's seller profile
 export async function GET() {
@@ -17,14 +30,28 @@ export async function GET() {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    // Sync Clerk avatar to seller profile only if no avatar is set yet
+    let sellerProfile = user.sellerProfile;
+    if (sellerProfile && !sellerProfile.avatarUrl) {
+      const clerkUser = await currentUser();
+      if (clerkUser?.imageUrl) {
+        sellerProfile = await db.sellerProfile.update({
+          where: { id: sellerProfile.id },
+          data: { avatarUrl: clerkUser.imageUrl },
+        });
+      }
+    }
+
     return NextResponse.json({
       user: {
         id: user.id,
         username: user.username,
         email: user.email,
         role: user.role,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionPlan: user.subscriptionPlan,
       },
-      sellerProfile: user.sellerProfile,
+      sellerProfile,
     });
   } catch (error) {
     console.error("Error fetching settings:", error);
@@ -35,10 +62,13 @@ export async function GET() {
 // Update seller profile settings
 export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId, has } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Clerk's has() is the authoritative subscription check for seller-specific settings
+    const hasListingFeature = has?.({ feature: "listing" }) ?? false;
 
     const user = await getOrCreateUser(userId);
 
@@ -47,6 +77,10 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = UpdateSettingsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
     const {
       displayName,
       bio,
@@ -58,33 +92,44 @@ export async function PUT(req: NextRequest) {
       maxDeliveryDistance,
       pickupType,
       paymentMethod,
-    } = body;
+      autoAcceptOrders,
+    } = parsed.data;
 
-    // Validate required fields
-    if (!displayName || displayName.trim() === "") {
-      return NextResponse.json({ error: "Display name is required" }, { status: 400 });
-    }
-
-    // Parse maxDeliveryDistance
-    const maxDeliveryDistanceFloat = maxDeliveryDistance
-      ? parseFloat(maxDeliveryDistance)
+    // Only include maxDeliveryDistance in update if it was explicitly provided
+    const hasMaxDeliveryDistance = maxDeliveryDistance !== undefined;
+    const maxDeliveryDistanceFloat = typeof maxDeliveryDistance === 'number'
+      ? maxDeliveryDistance
       : null;
+
+    // Build update data — only include optional fields if explicitly provided
+    const updateData: Record<string, unknown> = {
+      displayName: displayName.trim(),
+    };
+    if (bio !== undefined) updateData.bio = bio?.trim() || null;
+    if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl || null;
+    if (address !== undefined) updateData.address = address?.trim() || null;
+    if (city !== undefined) updateData.city = city?.trim() || null;
+    if (state !== undefined) updateData.state = state?.trim() || null;
+    if (zip !== undefined) updateData.zip = zip?.trim() || null;
+    if (hasMaxDeliveryDistance) updateData.maxDeliveryDistance = maxDeliveryDistanceFloat;
+
+    // Seller-specific settings require an active subscription
+    if (pickupType !== undefined || paymentMethod !== undefined || autoAcceptOrders !== undefined) {
+      if (!hasListingFeature) {
+        return NextResponse.json(
+          { error: "Seller subscription required to update seller settings", code: "SUBSCRIPTION_REQUIRED" },
+          { status: 403 }
+        );
+      }
+    }
+    if (pickupType !== undefined) updateData.pickupType = pickupType as PickupType;
+    if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod as PaymentMethod;
+    if (autoAcceptOrders !== undefined) updateData.autoAcceptOrders = autoAcceptOrders;
 
     // Upsert seller profile (create if doesn't exist)
     const sellerProfile = await db.sellerProfile.upsert({
       where: { userId: user.id },
-      update: {
-        displayName: displayName.trim(),
-        bio: bio?.trim() || null,
-        avatarUrl: avatarUrl || null,
-        address: address?.trim() || null,
-        city: city?.trim() || null,
-        state: state?.trim() || null,
-        zip: zip?.trim() || null,
-        maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
-      },
+      update: updateData,
       create: {
         userId: user.id,
         displayName: displayName.trim(),
@@ -95,10 +140,52 @@ export async function PUT(req: NextRequest) {
         state: state?.trim() || null,
         zip: zip?.trim() || null,
         maxDeliveryDistance: maxDeliveryDistanceFloat,
-        pickupType: pickupType || "ARRANGED",
-        paymentMethod: paymentMethod || "PLATFORM",
+        pickupType: (pickupType || "ARRANGED") as PickupType,
+        paymentMethod: (paymentMethod || "PLATFORM") as PaymentMethod,
+        autoAcceptOrders: autoAcceptOrders ?? true,
       },
     });
+
+    // Sync avatar to Clerk profile if it changed (with SSRF protection)
+    const previousAvatarUrl = user.sellerProfile?.avatarUrl;
+    if (avatarUrl && avatarUrl !== previousAvatarUrl && isAllowedAvatarUrl(avatarUrl)) {
+      try {
+        // Fetch with redirect:manual to prevent SSRF via redirect to internal hosts
+        const response = await fetch(avatarUrl, { redirect: "manual" });
+        
+        // Reject redirects and non-OK responses
+        if (!response.ok || response.status >= 300) {
+          throw new Error(`Invalid response: ${response.status}`);
+        }
+        
+        // Validate content type is an image
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.startsWith("image/")) {
+          throw new Error(`Invalid content type: ${contentType}`);
+        }
+        
+        // Enforce size limit (5MB max)
+        const contentLength = parseInt(response.headers.get("content-length") || "0", 10);
+        const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
+        if (contentLength > MAX_AVATAR_SIZE) {
+          throw new Error(`Avatar too large: ${contentLength} bytes`);
+        }
+        
+        const blob = await response.blob();
+        
+        // Double-check blob size (content-length can be missing/wrong)
+        if (blob.size > MAX_AVATAR_SIZE) {
+          throw new Error(`Avatar too large: ${blob.size} bytes`);
+        }
+        
+        const file = new File([blob], "avatar.jpg", { type: blob.type });
+        const clerk = await clerkClient();
+        await clerk.users.updateUserProfileImage(userId, { file });
+      } catch (err) {
+        console.error("Failed to sync avatar to Clerk:", err);
+        // Don't fail the request if Clerk sync fails
+      }
+    }
 
     // Update user role to SELLER if not already
     if (user.role !== "SELLER" && user.role !== "ADMIN") {

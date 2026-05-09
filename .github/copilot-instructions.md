@@ -97,20 +97,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Quick DB check for subscription status and listing limits
-  const dbCheck = await canCreateListing(userId)
-  if (!dbCheck.allowed) {
-    return NextResponse.json(
-      { error: dbCheck.reason, code: dbCheck.code },
-      { status: 403 }
-    )
-  }
-
-  // Verify with Clerk's has() for the actual gate (authoritative check)
+  // Clerk's has() is the authoritative subscription check
   const hasFeature = has({ feature: 'listing' })
   if (!hasFeature) {
     return NextResponse.json(
       { error: 'Subscription required', code: 'SUBSCRIPTION_REQUIRED' },
+      { status: 403 }
+    )
+  }
+
+  // DB check for listing limits only (not subscription status)
+  const dbCheck = await canCreateListing(userId)
+  if (!dbCheck.allowed) {
+    return NextResponse.json(
+      { error: dbCheck.reason, code: dbCheck.code },
       { status: 403 }
     )
   }
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
 ```
 
 **Subscription model:**
-- Dual check: DB for quick rejection + `has()` for authoritative verification
+- `has()` first for authoritative subscription check, then DB for limits only
 - User model stores: `subscriptionId`, `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiresAt`, `listingLimit`
 - SubscriptionStatus enum: NONE, ACTIVE, CANCELED, EXPIRED
 - EggListing has `hiddenBySubscription` to track subscription-hidden listings
@@ -186,3 +186,27 @@ Shared UI primitives are in `src/components/ui/`:
 - `Badge` - status indicators
 
 Import from the barrel file: `import { Button, Card } from '@/components/ui'`
+
+## Known False Positives for Code Review
+
+These patterns are **correct** in this codebase. Do NOT flag them as issues:
+
+### `clerkClient` is callable in Clerk v7
+In `@clerk/nextjs` v7, `clerkClient` exported from `@clerk/nextjs/server` is typed as `() => Promise<ClerkClient>`. Calling `await clerkClient()` is the **correct** usage pattern. It is NOT a plain object — it is a function that returns a client instance. See the type definition at `node_modules/@clerk/nextjs/dist/types/server/clerkClient.d.ts`.
+
+```typescript
+// CORRECT — do NOT suggest removing the function call
+const client = await clerkClient();
+await client.users.updateUserProfileImage(userId, { file });
+```
+
+### `auth.protect()` in Clerk middleware
+In Clerk v7 middleware, `auth` is a function object that supports both `auth()` and `auth.protect()`. Both patterns are valid. `auth.protect()` returns session data and can be used instead of calling `auth()` separately.
+
+### Pusher module structure
+The project intentionally splits Pusher code into three files:
+- `src/lib/pusher-constants.ts` — shared channel/event constants (no dependencies)
+- `src/lib/pusher-client.ts` — client-side Pusher instance + re-exports constants
+- `src/lib/pusher.ts` — server-side Pusher instance + trigger helpers (imports constants directly, NOT pusher-client)
+
+Server API routes import from `@/lib/pusher`. Client components import from `@/lib/pusher-client`. This is intentional to avoid pulling `pusher-js` into the server bundle.

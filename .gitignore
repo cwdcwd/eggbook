@@ -4,6 +4,9 @@ node_modules
 
 /src/generated/prisma
 
+# Generated service worker (copied from node_modules by postinstall)
+public/service-worker.js
+
 # Logs
 logs
 *.log
@@ -160,7 +163,8 @@ vite.config.ts.timestamp-*
 __MACOSX/
 .AppleDouble
 .LSOverride
-Icon[]
+Icon[
+]
 
 # Thumbnails
 ._*

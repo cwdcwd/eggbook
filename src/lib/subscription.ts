@@ -128,12 +128,13 @@ export async function handleSubscriptionUpdate(
 }
 
 /**
- * Check if user can create a new listing based on subscription and limits
+ * Check if user can create a new listing based on listing limits
+ * NOTE: Subscription status should be checked via Clerk's has() - this only checks DB limits
  * Returns { allowed: true } or { allowed: false, reason: string, code: string }
  */
 export async function canCreateListing(clerkUserId: string): Promise<
   | { allowed: true }
-  | { allowed: false; reason: string; code: 'SUBSCRIPTION_REQUIRED' | 'LISTING_LIMIT_REACHED' }
+  | { allowed: false; reason: string; code: 'USER_NOT_FOUND' | 'LISTING_LIMIT_REACHED' }
 > {
   const user = await db.user.findUnique({
     where: { clerkId: clerkUserId },
@@ -152,20 +153,11 @@ export async function canCreateListing(clerkUserId: string): Promise<
     return {
       allowed: false,
       reason: 'User not found',
-      code: 'SUBSCRIPTION_REQUIRED',
+      code: 'USER_NOT_FOUND',
     }
   }
 
-  // Check subscription status (quick DB check before has() verification)
-  if (user.subscriptionStatus !== SubscriptionStatus.ACTIVE) {
-    return {
-      allowed: false,
-      reason: 'Seller subscription required to create listings',
-      code: 'SUBSCRIPTION_REQUIRED',
-    }
-  }
-
-  // Check listing limit if set
+  // Check listing limit if set (subscription check should be done via has() before calling this)
   if (user.listingLimit !== null && user.sellerProfile) {
     const currentCount = user.sellerProfile._count.listings
     if (currentCount >= user.listingLimit) {
