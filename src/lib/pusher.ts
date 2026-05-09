@@ -1,9 +1,8 @@
 import Pusher from 'pusher'
+import { CHANNELS, EVENTS } from './pusher-constants'
 
-// Re-export client-safe constants so existing server imports still work
-export { CHANNELS, EVENTS } from './pusher-client'
-export { getPusherClient } from './pusher-client'
-import { CHANNELS, EVENTS } from './pusher-client'
+// Re-export constants for backward compatibility with server-side imports
+export { CHANNELS, EVENTS } from './pusher-constants'
 
 // Check if Pusher is configured
 const isPusherConfigured = !!(

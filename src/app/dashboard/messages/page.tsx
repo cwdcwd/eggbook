@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useUser, useAuth } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import { Send, ArrowLeft, User, Loader2 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/utils";
@@ -31,7 +31,6 @@ interface Conversation {
 
 function MessagesPageContent() {
   const { user } = useUser();
-  const { userId: clerkUserId } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const orderId = searchParams.get("order");

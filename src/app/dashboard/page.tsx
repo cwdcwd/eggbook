@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Package, ShoppingCart, DollarSign, TrendingUp, Plus } from "lucide-react";
+import { Package, ShoppingCart, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Button } from "@/components/ui";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";

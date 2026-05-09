@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { MapPin, Heart, Star, Truck } from "lucide-react";
+import { MapPin, Heart, Truck } from "lucide-react";
 import { Card, Badge } from "@/components/ui";
 import { formatPrice, cn } from "@/lib/utils";
 

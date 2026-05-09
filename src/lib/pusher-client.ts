@@ -1,5 +1,8 @@
 import PusherClient from 'pusher-js'
 
+// Re-export shared constants for convenience
+export { CHANNELS, EVENTS } from './pusher-constants'
+
 // Check if client-side Pusher is configured
 const isClientPusherConfigured = !!(
   process.env.NEXT_PUBLIC_PUSHER_KEY &&
@@ -22,21 +25,4 @@ export function getPusherClient(): PusherClient | null {
     )
   }
   return pusherClientInstance
-}
-
-// Channel naming conventions
-export const CHANNELS = {
-  conversation: (id: string) => `conversation-${id}`,
-  user: (id: string) => `user-${id}`,
-  seller: (id: string) => `seller-${id}`,
-}
-
-// Event types
-export const EVENTS = {
-  NEW_MESSAGE: 'new-message',
-  NEW_ORDER: 'new-order',
-  ORDER_UPDATE: 'order-update',
-  TYPING: 'typing',
-  USER_NEW_MESSAGE: 'user-new-message',
-  MESSAGES_READ: 'messages-read',
 }
