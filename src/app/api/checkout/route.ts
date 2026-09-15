@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { createCheckoutSession } from "@/lib/stripe";
 import { getOrCreateUser } from "@/lib/auth";
 import { CheckoutSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +12,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const body = await req.json();
     const parsed = CheckoutSchema.safeParse(body);

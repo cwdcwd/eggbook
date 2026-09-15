@@ -1,6 +1,6 @@
 # Eggbook Database Schema
 
-This document describes the current database schema and proposed changes for subscription support.
+This document describes the database schema, including the subscription support fields that are now implemented in `prisma/schema.prisma`.
 
 ---
 
@@ -19,6 +19,11 @@ Synced from Clerk authentication. Core user identity.
 | `role` | UserRole | BUYER, SELLER, or ADMIN |
 | `createdAt` | DateTime | Account creation time |
 | `updatedAt` | DateTime | Last update time |
+| `subscriptionId` | String? | Clerk subscription ID |
+| `subscriptionPlan` | String? | Plan name (e.g., "seller_plan") |
+| `subscriptionStatus` | SubscriptionStatus | Current subscription state |
+| `subscriptionExpiresAt` | DateTime? | When subscription ends |
+| `listingLimit` | Int? | Max listings allowed (null = unlimited) |
 
 **Relations:**
 - `sellerProfile` → SellerProfile (optional, 1:1)
@@ -80,6 +85,7 @@ Product listings with flexible pricing units.
 | `customUnitQty` | Int? | Quantity in custom unit |
 | `stockCount` | Int | Available stock (default: 0) |
 | `isAvailable` | Boolean | Listing visibility (default: true) |
+| `hiddenBySubscription` | Boolean | True if hidden due to subscription expiry (default: false) |
 | `photos` | String[] | Vercel Blob URLs |
 | `createdAt` | DateTime | Creation time |
 | `updatedAt` | DateTime | Last update time |
@@ -279,40 +285,21 @@ Tracks monthly sales for fee tier calculation.
 - `STARTER` - $500-2000/month, 2% fee
 - `PRO` - $2000+/month, 3% fee
 
----
-
-## Proposed Changes for Subscription Support
-
-### New Fields on User
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `subscriptionId` | String? | Clerk subscription ID |
-| `subscriptionPlan` | String? | Plan name (e.g., "seller_plan") |
-| `subscriptionStatus` | SubscriptionStatus | Current subscription state |
-| `subscriptionExpiresAt` | DateTime? | When subscription ends |
-| `listingLimit` | Int? | Max listings allowed (null = unlimited) |
-
-### New Enum: SubscriptionStatus
-
-```prisma
-enum SubscriptionStatus {
-  NONE      // No subscription
-  ACTIVE    // Active and valid
-  CANCELED  // User canceled, may still be active until period ends
-  EXPIRED   // Subscription ended, listings hidden immediately
-}
-```
+### SubscriptionStatus (implemented)
+- `NONE` - No subscription
+- `ACTIVE` - Active and valid
+- `CANCELED` - User canceled, may still be active until period ends
+- `EXPIRED` - Subscription ended, listings hidden immediately
 
 > **Note:** No PAST_DUE status. Listings are hidden immediately on subscription end.
 
-### New Field on EggListing
+---
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `hiddenBySubscription` | Boolean | True if hidden due to subscription expiry (default: false) |
+## Subscription Field Semantics
 
-This field distinguishes listings hidden because the seller's subscription expired from listings the seller intentionally marked as unavailable. When a subscription is reactivated, only listings with `hiddenBySubscription = true` should be restored to `isAvailable = true`.
+The subscription fields (documented above under [User](#user) and [EggListing](#egglisting)) are **implemented** in `prisma/schema.prisma` and synced from Clerk Billing via the Clerk webhook (`src/app/api/webhooks/clerk/route.ts`).
+
+`hiddenBySubscription` distinguishes listings hidden because the seller's subscription expired from listings the seller intentionally marked as unavailable. When a subscription is reactivated, only listings with `hiddenBySubscription = true` are restored to `isAvailable = true`.
 
 ---
 
@@ -474,7 +461,7 @@ flowchart LR
     SP -->|sends| M
 ```
 
-### Subscription Flow (Proposed)
+### Subscription Flow (implemented)
 
 ```mermaid
 stateDiagram-v2
@@ -496,7 +483,7 @@ stateDiagram-v2
 
 > **Note:** No grace period. Listings are hidden immediately when subscription ends.
 
-### Data Model with Proposed Subscription Fields
+### Data Model with Subscription Fields (implemented)
 
 ```mermaid
 erDiagram
@@ -506,17 +493,17 @@ erDiagram
     User {
         string id PK
         string clerkId UK
-        string subscriptionId "NEW"
-        string subscriptionPlan "NEW"
-        SubscriptionStatus subscriptionStatus "NEW"
-        datetime subscriptionExpiresAt "NEW"
-        int listingLimit "NEW"
+        string subscriptionId
+        string subscriptionPlan
+        SubscriptionStatus subscriptionStatus
+        datetime subscriptionExpiresAt
+        int listingLimit
     }
 
     EggListing {
         string id PK
         string sellerId FK
         boolean isAvailable
-        boolean hiddenBySubscription "NEW"
+        boolean hiddenBySubscription
     }
 ```

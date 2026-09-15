@@ -5,6 +5,7 @@ import { PricingUnit } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
 import { canCreateListing } from "@/lib/subscription";
 import { CreateListingSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Create a new listing
 export async function POST(req: NextRequest) {
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     // Clerk's has() is the authoritative subscription check
     const hasListingFeature = has?.({ feature: "listing" }) ?? false;
