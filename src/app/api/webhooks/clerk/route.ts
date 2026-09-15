@@ -2,6 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { upsertClerkUser } from "@/lib/user-sync";
 
 import {
   handleSubscriptionActivation,
@@ -56,14 +57,9 @@ export async function POST(req: Request) {
       return new Response("Error: No email address", { status: 400 });
     }
 
-    await db.user.create({
-      data: {
-        clerkId: id,
-        email,
-        username: username || email.split("@")[0],
-        role: "BUYER",
-      },
-    });
+    // Idempotent: safe on Clerk redelivery and when the API fallback path
+    // created the row first (upserts instead of P2002-crashing).
+    await upsertClerkUser({ clerkId: id, email, username: username ?? null });
   }
 
   if (eventType === "user.updated") {
@@ -71,20 +67,21 @@ export async function POST(req: Request) {
     const email = email_addresses[0]?.email_address;
 
     if (email) {
-      // Update user
-      const user = await db.user.update({
-        where: { clerkId: id },
-        data: {
-          email,
-          username: username || email.split("@")[0],
-        },
-        include: { sellerProfile: true },
+      // Idempotent: updates the row when present, creates it if missing
+      // (P2025-safe — user.updated can no longer wedge Clerk's retry loop).
+      const user = await upsertClerkUser({
+        clerkId: id,
+        email,
+        username: username ?? null,
       });
 
       // Sync Clerk avatar to seller profile only if no custom avatar set
-      if (user.sellerProfile && image_url && !user.sellerProfile.avatarUrl) {
+      const profile = await db.sellerProfile.findUnique({
+        where: { userId: user.id },
+      });
+      if (profile && image_url && !profile.avatarUrl) {
         await db.sellerProfile.update({
-          where: { id: user.sellerProfile.id },
+          where: { id: profile.id },
           data: { avatarUrl: image_url },
         });
       }
@@ -95,7 +92,9 @@ export async function POST(req: Request) {
     const { id } = evt.data;
 
     if (id) {
-      await db.user.delete({
+      // deleteMany (not delete) — idempotent on Clerk redelivery; a bare
+      // delete would P2025 and re-wedge the retry loop for a missing row.
+      await db.user.deleteMany({
         where: { clerkId: id },
       });
     }
