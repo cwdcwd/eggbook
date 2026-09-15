@@ -1,5 +1,6 @@
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
+import { upsertClerkUser } from './user-sync'
 
 /**
  * Verify admin access using Clerk session claims.
@@ -38,15 +39,23 @@ export async function getOrCreateUser(clerkUserId: string) {
       return null;
     }
 
-    user = await db.user.create({
-      data: {
-        clerkId: clerkUserId,
-        email,
-        username: clerkUser.username || email.split("@")[0],
-        role: "BUYER",
-      },
+    // Shared idempotent sync — same code path as the Clerk webhook, so
+    // the fallback and the webhook cannot diverge or P2002-race each other.
+    await upsertClerkUser({
+      clerkId: clerkUserId,
+      email,
+      username: clerkUser.username ?? null,
+    });
+
+    // Re-read with the sellerProfile include the callers rely on; this is
+    // also the canonical row if a concurrent path created it first.
+    user = await db.user.findUnique({
+      where: { clerkId: clerkUserId },
       include: { sellerProfile: true },
     });
+    if (!user) {
+      return null;
+    }
   }
 
   return user;

@@ -7,6 +7,7 @@
     "build": "prisma generate && npm run copy-sw && next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "postinstall": "prisma generate && npm run copy-sw",
     "db:migrate": "prisma migrate deploy",
     "copy-sw": "node scripts/copy-sw.mjs",
