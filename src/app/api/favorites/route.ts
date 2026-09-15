@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 import { AddFavoriteSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Add a seller to favorites
 export async function POST(req: NextRequest) {
@@ -11,6 +12,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const user = await getOrCreateUser(userId);
     if (!user) {
@@ -110,6 +114,9 @@ export async function DELETE(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const user = await getOrCreateUser(userId);
     if (!user) {
