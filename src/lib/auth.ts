@@ -88,25 +88,3 @@ export async function requireSeller() {
   }
   return user
 }
-
-export async function syncUserFromClerk(clerkUser: {
-  id: string
-  username: string | null
-  emailAddresses: { emailAddress: string }[]
-}) {
-  const email = clerkUser.emailAddresses[0]?.emailAddress
-  if (!email) throw new Error('No email found')
-
-  const username = clerkUser.username || email.split('@')[0]
-
-  return db.user.upsert({
-    where: { clerkId: clerkUser.id },
-    update: { email, username },
-    create: {
-      clerkId: clerkUser.id,
-      email,
-      username,
-      role: 'BUYER',
-    },
-  })
-}
