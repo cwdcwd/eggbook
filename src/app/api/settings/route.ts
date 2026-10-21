@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { PickupType, PaymentMethod } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
 import { UpdateSettingsSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Allowed URL patterns for avatar sync (SSRF protection)
 const ALLOWED_AVATAR_PATTERNS = [
@@ -66,6 +67,9 @@ export async function PUT(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     // Clerk's has() is the authoritative subscription check for seller-specific settings
     const hasListingFeature = has?.({ feature: "listing" }) ?? false;

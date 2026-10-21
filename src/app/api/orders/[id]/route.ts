@@ -6,6 +6,7 @@ import { logOrderStatusChange } from "@/lib/order-audit";
 import { triggerOrderUpdate } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
 import { OrderActionSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -71,6 +72,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const { id } = await params;
 

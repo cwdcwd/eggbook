@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 import { createConnectAccount, createAccountLink, getAccountStatus } from "@/lib/stripe";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Start Stripe Connect onboarding
 export async function POST(req: NextRequest) {
@@ -11,6 +12,9 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     // Clerk's has() is the authoritative subscription check for Stripe onboarding
     const hasListingFeature = has?.({ feature: "listing" }) ?? false;

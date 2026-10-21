@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { PricingUnit } from "@prisma/client";
 import { UpdateListingSchema } from "@/lib/schemas";
+import { rateLimit } from "@/lib/rate-limit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -47,6 +48,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     // Clerk's has() is the authoritative subscription check
     const hasListingFeature = has?.({ feature: "listing" }) ?? false;
@@ -176,6 +180,9 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
 
     const { id } = await params;
 
