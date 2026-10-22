@@ -6,7 +6,7 @@ function getStripeClient(): Stripe {
     throw new Error('STRIPE_SECRET_KEY is not set')
   }
   return new Stripe(key, {
-    apiVersion: '2026-03-25.dahlia',
+    apiVersion: '2026-09-30.endive',
     typescript: true,
   })
 }
