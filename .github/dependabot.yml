@@ -16,6 +16,9 @@ updates:
       # @types/node tracks the runtime's Node major, bump it alongside the runtime
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # ESLint 10 breaks eslint-plugin-react 7.x (via eslint-config-next); revisit when it supports 10
+      - dependency-name: "eslint"
+        versions: [">=10"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
