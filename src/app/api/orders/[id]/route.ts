@@ -11,6 +11,8 @@ import {
   isTransitionAllowed,
   type OrderActionName,
 } from "@/lib/payment-integrity";
+import { runGuardedOrderTransition } from "@/lib/order-transition";
+import { Prisma } from "@prisma/client";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -144,89 +146,107 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     // Determine actor type
     const actorType = isSeller ? "SELLER" : "BUYER";
 
-    // Update order and log status change in transaction
-    const result = await db.$transaction(async (tx) => {
-      // Re-read inside transaction; all decisions below use current state so a
-      // concurrent webhook payment update is honoured instead of overwritten.
-      const current = await tx.order.findUniqueOrThrow({
-        where: { id },
-        select: { status: true, paidAt: true, checkoutSessionId: true },
-      });
+    // The session-expiry hook only RECORDS inside the transaction and is
+    // dispatched after the response, so a rollback can never leave an expiry
+    // scheduled for an order that was not actually cancelled.
+    let expireSessionId: string | null = null;
 
-      if (!isTransitionAllowed(action as OrderActionName, current.status)) {
-        return { conflict: true as const };
-      }
-
-      // Compare-and-set: applies only if the status is unchanged since the read;
-      // a concurrent mutation makes this a no-op we surface as a conflict.
-      const updatedRows = await tx.order.updateMany({
-        where: { id, status: current.status },
-        data: {
-          status: transition.toStatus,
-          ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
-          ...(action === "decline" && { cancelReason }),
-          ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
-          ...(action === "complete" && { completedAt: new Date(), ...(!current.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
-        },
-      });
-
-      if (updatedRows.count === 0) {
-        return { conflict: true as const };
-      }
-
-      const updated = await tx.order.findUniqueOrThrow({
-        where: { id },
-        include: {
-          listing: true,
-          buyer: true,
-          seller: { include: { user: true } },
-        },
-      });
-
-      // If declined or cancelled, restore stock (inside the guarded branch,
-      // so it runs exactly once for the winning transition)
-      if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
-        await tx.eggListing.update({
-          where: { id: order.listingId },
-          data: {
-            stockCount: { increment: order.quantity },
-          },
-        });
-      }
-
-      // Log status change to audit trail
-      const auditReason = (() => {
-        if (cancelReason) return cancelReason;
-        if (action === "markPaid") return "Marked as paid (external payment)";
-        if (action === "complete" && current.status === "CONFIRMED") return "Completed with external payment";
-        return null;
-      })();
-
-      await logOrderStatusChange({
+    // Update order and log status change in transaction; the guarded-flow
+    // module owns the CAS and the post-CAS session snapshot (see its header).
+    const result = await db.$transaction(async (tx) =>
+      runGuardedOrderTransition({
         orderId: id,
-        fromStatus: current.status,
-        toStatus: transition.toStatus,
-        changedBy: userId,
-        changedByType: actorType,
-        reason: auditReason,
-        tx,
-      });
+        ports: {
+          // Re-read inside transaction; all decisions use current state so a
+          // concurrent webhook payment update is honoured instead of overwritten.
+          findCurrent: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              select: { status: true, paidAt: true },
+            }),
+          applyTransition: (spec) =>
+            tx.order
+              .updateMany({
+                where: { id: spec.where.id, status: spec.where.status },
+                data: spec.data as Prisma.OrderUpdateManyArgs["data"],
+              })
+              .then((res) => res.count),
+          readAfterTransition: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              include: {
+                listing: true,
+                buyer: true,
+                seller: { include: { user: true } },
+              },
+            }),
+          expireSession: (sessionId) => {
+            expireSessionId = sessionId;
+            return Promise.resolve();
+          },
+        },
+        plan: (current) => {
+          if (!isTransitionAllowed(action as OrderActionName, current.status)) {
+            return null; // becomes the shared conflict outcome
+          }
+          return {
+            toStatus: transition.toStatus,
+            data: {
+              status: transition.toStatus,
+              ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
+              ...(action === "decline" && { cancelReason }),
+              ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
+              ...(action === "complete" && { completedAt: new Date(), ...(!current.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
+            },
+          };
+        },
+        onApplied: async ({ current, plan: appliedPlan }) => {
+          // If declined or cancelled, restore stock (inside the guarded branch,
+          // so it runs exactly once for the winning transition)
+          if (["DECLINED", "CANCELLED"].includes(appliedPlan.toStatus)) {
+            await tx.eggListing.update({
+              where: { id: order.listingId },
+              data: {
+                stockCount: { increment: order.quantity },
+              },
+            });
+          }
 
-      return { conflict: false as const, updated, checkoutSessionId: current.checkoutSessionId };
-    });
+          // Log status change to audit trail
+          const auditReason = (() => {
+            if (cancelReason) return cancelReason;
+            if (action === "markPaid") return "Marked as paid (external payment)";
+            if (action === "complete" && current.status === "CONFIRMED") return "Completed with external payment";
+            return null;
+          })();
 
-    if (result.conflict) {
+          await logOrderStatusChange({
+            orderId: id,
+            fromStatus: current.status,
+            toStatus: transition.toStatus,
+            changedBy: userId,
+            changedByType: actorType,
+            reason: auditReason,
+            tx,
+          });
+        },
+      })
+    );
+
+    if (!result.applied) {
       return NextResponse.json(
         { error: "Order was updated concurrently; please reload and retry" },
         { status: 409 }
       );
     }
-    const updatedOrder = result.updated;
+    const updatedOrder = result.row;
 
-    // Eligible cancellation: an open checkout session must no longer be payable.
-    if (["cancel", "decline"].includes(action) && result.checkoutSessionId) {
+    // Eligible cancellation: the session snapshot taken AFTER the successful
+    // CAS (see the flow module) must no longer be payable.
+    if (expireSessionId) {
+      const sessionId = expireSessionId;
       after(async () => {
-        await expireCheckoutSession(result.checkoutSessionId!);
+        await expireCheckoutSession(sessionId);
       });
     }
 

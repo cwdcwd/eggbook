@@ -19,8 +19,15 @@ import {
   applyCumulativeRefund,
   checkoutClaimSpec,
   dollarsToCents,
+  isTransitionAllowed,
+  ORDER_TRANSITIONS,
+  type OrderActionName,
   type OrderStatusName,
 } from "../src/lib/payment-integrity";
+import {
+  runGuardedOrderTransition,
+  type GuardedTransitionPorts,
+} from "../src/lib/order-transition";
 import {
   createCheckoutForOrder,
   type CheckoutSessionCreateInput,
@@ -502,4 +509,129 @@ test("a late refund event for an already-cancelled order only tracks the balance
   assert.equal(after.refundedCents, 700);
   assert.equal(store.stockRestores, 0);
   assert.equal(store.listings.get("l1")!.stockCount, 7);
+});
+
+// ---------------------------------------------------------------------------
+// Guarded order transitions (seller actions / admin overrides) — R1: a cancel/
+// decline must expire the session snapshot taken AFTER its compare-and-set,
+// never the stale pre-CAS read.
+// ---------------------------------------------------------------------------
+
+/** Ports for runGuardedOrderTransition bound to the store; `afterFindCurrent`
+ * runs right after the transition's read snapshot is taken — the window
+ * between the cancel path's read and its compare-and-set. */
+function transitionPorts(
+  store: FakeStore,
+  afterFindCurrent?: () => void
+): GuardedTransitionPorts<OrderRow, OrderRow> {
+  return {
+    findCurrent: async (id) => {
+      const snapshot = { ...store.orders.get(id)! };
+      // A concurrent effect lands AFTER our snapshot but BEFORE our CAS —
+      // the exact interleaving the routes execute.
+      afterFindCurrent?.();
+      return snapshot;
+    },
+    applyTransition: async (spec) => applyGuardedOrderUpdate(store, spec),
+    readAfterTransition: async (id) => ({ ...store.orders.get(id)! }),
+    expireSession: async (sessionId) => store.expireSession(sessionId),
+  };
+}
+
+test("claim wins between the cancel's snapshot and its CAS: the mid-flight session is expired, no payable URL survives", async () => {
+  // R1 regression: claims do not touch status, so a checkout claim committing
+  // between the cancel path's snapshot and its CAS cannot block the
+  // transition AND is invisible to the stale snapshot. Expiry must consume a
+  // read taken AFTER the CAS — otherwise the session the buyer is actively
+  // paying with stays open on a cancelled, stock-restored order: cash taken
+  // with no recovery path.
+  const store = new FakeStore();
+  store.seedListing();
+  store.seedOrder();
+  const midflight = store.seedSession({ id: "cs_mid", url: "https://pay.example/mid" });
+
+  let claimed = false;
+  const result = await runGuardedOrderTransition({
+    orderId: "o1",
+    ports: transitionPorts(store, () => {
+      if (!claimed) {
+        claimed = true;
+        // The buyer's checkout attempt claims the slot in the gap: the claim
+        // CAS gates on (id, observed session=null, status CONFIRMED) and wins
+        // WITHOUT touching status — the cancel's CAS is not invalidated.
+        assert.equal(applyGuardedOrderUpdate(store, checkoutClaimSpec("o1", null, midflight.id)), 1);
+      }
+    }),
+    plan: (current) => {
+      const action: OrderActionName = "cancel";
+      if (!isTransitionAllowed(action, current.status)) return null;
+      const transition = ORDER_TRANSITIONS[action];
+      return {
+        toStatus: transition.toStatus,
+        data: { status: transition.toStatus, cancelledAt: new Date(), cancelReason: "Buyer cancelled" },
+      };
+    },
+    onApplied: async ({ plan: appliedPlan }) => {
+      // Route-policy shape: stock restored exactly once for a winning cancel.
+      if (["DECLINED", "CANCELLED"].includes(appliedPlan.toStatus)) {
+        const row = store.orders.get("o1")!;
+        store.restoreStock(row.listingId, row.quantity);
+      }
+    },
+  });
+
+  assert.ok(result.applied);
+  assert.ok(result.applied && result.expiredSessionId === midflight.id, "expiry must consume the POST-CAS session snapshot");
+  const row = store.orders.get("o1")!;
+  assert.equal(row.status, "CANCELLED"); // the cancel CAS lands despite the interleaved claim
+  assert.equal(row.checkoutSessionId, midflight.id); // the claim stands
+  assert.deepEqual(store.expiredSessions, [midflight.id]); // the MID-FLIGHT session — a stale snapshot would expire NOTHING
+  assert.equal(store.sessions.get(midflight.id)!.status, "expired"); // no payable URL survives
+  assert.equal(store.stockRestores, 1); // stock restored exactly once for the winning cancel
+});
+
+test("uncontended cancel still expires the order's stored open session from the post-CAS read", async () => {
+  const store = new FakeStore();
+  store.seedListing();
+  const stored = store.seedSession({ id: "cs_open" });
+  store.seedOrder({ checkoutSessionId: stored.id });
+
+  const result = await runGuardedOrderTransition({
+    orderId: "o1",
+    ports: transitionPorts(store),
+    plan: (current) => {
+      const action: OrderActionName = "cancel";
+      if (!isTransitionAllowed(action, current.status)) return null;
+      const transition = ORDER_TRANSITIONS[action];
+      return { toStatus: transition.toStatus, data: { status: transition.toStatus } };
+    },
+  });
+
+  assert.ok(result.applied && result.expiredSessionId === stored.id);
+  assert.equal(store.orders.get("o1")!.status, "CANCELLED");
+  assert.deepEqual(store.expiredSessions, [stored.id]); // the stored session expired after the CAS
+  assert.equal(store.sessions.get(stored.id)!.status, "expired");
+  assert.equal(store.stockRestores, 0); // expiry alone never touches inventory
+});
+
+test("non-terminal transitions never expire the stored session or restore stock", async () => {
+  const store = new FakeStore();
+  const stored = store.seedSession({ id: "cs_open" });
+  store.seedOrder({ checkoutSessionId: stored.id });
+
+  const result = await runGuardedOrderTransition({
+    orderId: "o1",
+    ports: transitionPorts(store),
+    plan: (current) => {
+      const action: OrderActionName = "markPaid";
+      if (!isTransitionAllowed(action, current.status)) return null;
+      const transition = ORDER_TRANSITIONS[action];
+      return { toStatus: transition.toStatus, data: { status: transition.toStatus, paidAt: new Date() } };
+    },
+  });
+
+  assert.ok(result.applied && result.expiredSessionId === null);
+  assert.equal(store.orders.get("o1")!.status, "PAID");
+  assert.deepEqual(store.expiredSessions, []); // only cancel/decline expire a session
+  assert.equal(store.sessions.get(stored.id)!.status, "open"); // the buyer's URL stays valid
 });

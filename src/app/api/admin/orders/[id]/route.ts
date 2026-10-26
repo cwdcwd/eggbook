@@ -6,6 +6,8 @@ import { AdminOrderStatusSchema } from "@/lib/schemas";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { expireCheckoutSession } from "@/lib/stripe";
 import { nextAdminStatus, type AdminStatusRejectionCode } from "@/lib/payment-integrity";
+import { runGuardedOrderTransition } from "@/lib/order-transition";
+import { Prisma } from "@prisma/client";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -101,75 +103,97 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       updateData.completedAt = new Date();
     }
 
-    const result = await db.$transaction(async (tx) => {
-      // Read current state inside transaction; the override decision is
-      // re-validated against it so a concurrent payment can't be overwritten.
-      const current = await tx.order.findUniqueOrThrow({
-        where: { id },
-        select: { status: true, stripePaymentId: true },
-      });
+    // The session-expiry hook only RECORDS inside the transaction and is
+    // dispatched after the response, so a rollback can never leave an expiry
+    // scheduled for an order that was not actually cancelled.
+    let expireSessionId: string | null = null;
 
-      const currentRule = nextAdminStatus(current.status, status, Boolean(current.stripePaymentId));
-      if (!currentRule.allowed) {
-        return { conflict: true as const };
-      }
-
-      // Compare-and-set: only applies if status is unchanged since the read.
-      const updatedRows = await tx.order.updateMany({
-        where: { id, status: current.status },
-        data: updateData,
-      });
-
-      if (updatedRows.count === 0) {
-        return { conflict: true as const };
-      }
-
-      const updated = await tx.order.findUniqueOrThrow({
-        where: { id },
-        include: {
-          listing: true,
-          buyer: true,
-          seller: { include: { user: true } },
-        },
-      });
-
-      // Restore stock only when transitioning FROM a non-fulfilled status
-      const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
-      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !noRestoreStatuses.includes(current.status)) {
-        await tx.eggListing.update({
-          where: { id: order.listingId },
-          data: { stockCount: { increment: order.quantity } },
-        });
-      }
-
-      await logOrderStatusChange({
+    const result = await db.$transaction(async (tx) =>
+      runGuardedOrderTransition({
         orderId: id,
-        fromStatus: current.status,
-        toStatus: status,
-        changedBy: userId,
-        changedByType: "ADMIN",
-        reason,
-        tx,
-      });
+        ports: {
+          // Read current state inside transaction; the override decision is
+          // re-validated against it so a concurrent payment can't be overwritten.
+          findCurrent: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              select: { status: true, stripePaymentId: true },
+            }),
+          applyTransition: (spec) =>
+            tx.order
+              .updateMany({
+                where: { id: spec.where.id, status: spec.where.status },
+                data: spec.data as Prisma.OrderUpdateManyArgs["data"],
+              })
+              .then((res) => res.count),
+          readAfterTransition: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              include: {
+                listing: true,
+                buyer: true,
+                seller: { include: { user: true } },
+              },
+            }),
+          expireSession: (sessionId) => {
+            expireSessionId = sessionId;
+            return Promise.resolve();
+          },
+        },
+        plan: (current) => {
+          const currentRule = nextAdminStatus(current.status, status, Boolean(current.stripePaymentId));
+          if (!currentRule.allowed) {
+            return null; // becomes the shared conflict outcome
+          }
+          return {
+            toStatus: status,
+            data: updateData,
+          };
+        },
+        onApplied: async ({ current, plan: appliedPlan }) => {
+          // Restore stock only when transitioning FROM a non-fulfilled status
+          const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
+          if (
+            (appliedPlan.toStatus === "CANCELLED" || appliedPlan.toStatus === "DECLINED") &&
+            order.listingId &&
+            !noRestoreStatuses.includes(current.status)
+          ) {
+            await tx.eggListing.update({
+              where: { id: order.listingId },
+              data: { stockCount: { increment: order.quantity } },
+            });
+          }
 
-      return { conflict: false as const, updated, checkoutSessionId: order.checkoutSessionId };
-    });
+          await logOrderStatusChange({
+            orderId: id,
+            fromStatus: current.status,
+            toStatus: status,
+            changedBy: userId,
+            changedByType: "ADMIN",
+            reason,
+            tx,
+          });
+        },
+      })
+    );
 
-    if (result.conflict) {
+    if (!result.applied) {
       return NextResponse.json(
         { error: "Order was updated concurrently; please reload and retry" },
         { status: 409 }
       );
     }
 
-    // Eligible cancellation: an open checkout session must no longer be payable.
-    if ((status === "CANCELLED" || status === "DECLINED") && result.checkoutSessionId) {
+    // Eligible cancellation: the session snapshot taken AFTER the successful
+    // CAS (see the flow module) must no longer be payable.
+    if (expireSessionId) {
+      const sessionId = expireSessionId;
       after(async () => {
-        await expireCheckoutSession(result.checkoutSessionId!);
+        await expireCheckoutSession(sessionId);
       });
     }
 
-    return NextResponse.json(result.updated);
+    return NextResponse.json(result.row);
   } catch (error) {
     console.error("Error updating order:", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
