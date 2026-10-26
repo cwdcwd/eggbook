@@ -133,7 +133,9 @@ function MessagesPageContent() {
   }, []);
 
   useEffect(() => {
-    fetchConversations();
+    queueMicrotask(() => {
+      fetchConversations();
+    });
   }, [fetchConversations]);
 
   // Real-time: refresh conversation list when a new message arrives (for any conversation)
@@ -160,7 +162,9 @@ function MessagesPageContent() {
   // Handle order parameter to start conversation
   useEffect(() => {
     if (orderId && !isLoading) {
-      startConversationFromOrder(orderId);
+      queueMicrotask(() => {
+        startConversationFromOrder(orderId);
+      });
     }
   }, [orderId, isLoading, startConversationFromOrder]);
 

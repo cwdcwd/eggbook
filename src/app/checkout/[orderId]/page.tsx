@@ -105,7 +105,7 @@ export default function CheckoutPage({
         <Card className="p-8 text-center max-w-md">
           <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
           <h2 className="text-lg font-semibold text-amber-900 mb-2">Order Not Found</h2>
-          <p className="text-amber-600 mb-4">This order doesn't exist or you don't have access to it.</p>
+          <p className="text-amber-600 mb-4">This order doesn&apos;t exist or you don&apos;t have access to it.</p>
           <Link href="/dashboard">
             <Button>Go to Dashboard</Button>
           </Link>

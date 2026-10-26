@@ -143,7 +143,9 @@ function MessagesPageContent() {
   // Handle order parameter to start conversation
   useEffect(() => {
     if (orderId && !isLoading) {
-      startConversationFromOrder(orderId);
+      queueMicrotask(() => {
+        startConversationFromOrder(orderId);
+      });
     }
   }, [orderId, isLoading, startConversationFromOrder]);
 
