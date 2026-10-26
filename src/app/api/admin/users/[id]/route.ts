@@ -187,7 +187,15 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     // the market without the suspension marker so no future unsuspend can
     // silently re-list a deactivated user's inventory.
     if (targetUser.sellerProfile) {
+      // Same per-seller advisory lock as suspend/unsuspend/role-change and
+      // the listing-create transaction (keyed on the user row): a
+      // deactivation whose isActive flip is still uncommitted cannot be
+      // observed by a concurrent create's eligibility re-read, and a create
+      // that completed before the lock cannot land a still-public row after
+      // the unfiltered hide — the hide takes every row of the seller,
+      // including anything it just created.
       await db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`seller-entitlement:${targetUser.id}`}), 0)`;
         await tx.sellerProfile.update({
           where: { id: targetUser.sellerProfile!.id },
           data: { isActive: false },

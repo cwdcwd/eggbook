@@ -865,6 +865,80 @@ test("create: an UN-serialized eligibility read (the original gap) would land a 
   assert.deepEqual(publicIds, ["l-new"], "the gap: a public, unmarked listing of a suspended seller");
 });
 
+test("create: a user-DELETE deactivation committed between the route reads is caught by the in-transaction re-read (same-lock serialization)", () => {
+  // The round-3 serialization: the admin user-DELETE deactivation is the 4th
+  // entitlement-flip event and holds the SAME per-seller advisory lock as
+  // suspend/role-change and the create route — so a create cannot ride a
+  // stale eligibility read across an uncommitted isActive flip. With the
+  // lock, the deactivation either runs entirely before the create's
+  // in-transaction re-read (refused below) or its unfiltered hide runs
+  // entirely after the create's insert (the new row is hidden like the rest).
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", true);
+
+  // Route pre-read (outside the transaction): seller looks eligible.
+  const pre = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(pre.allowed, true);
+
+  // Admin deactivate holds the same lock and completes: flip + the
+  // unfiltered, markerless hide (0 public rows to hide yet).
+  store.seedSellerProfile("s1", false);
+  assert.equal(store.applySpec({ where: { sellerId: "s1" }, data: { isAvailable: false } }), 0);
+
+  // Inside the locked transaction, the FRESH read sees the new state.
+  const inTx = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(inTx.allowed, false);
+  assert.equal(inTx.allowed === false && inTx.code, "SELLER_SUSPENDED");
+  assert.equal(store.listings.size, 0, "no listing was created for the deactivated seller");
+});
+
+test("create: an UN-serialized deactivation (no lock on the admin side) would land a public, unmarked, unrepairable listing of a deactivated seller", () => {
+  // Negative control (same shape as the suspend control): without the same
+  // lock, the create's in-transaction re-read executes while the deactivation
+  // tx has flipped isActive but not committed — READ COMMITTED cannot watch
+  // another transaction's uncommitted write, so eligibility passes and the
+  // insert lands AFTER the deactivation's unfiltered hide updateMany ran.
+  // The row is isAvailable:true with NO markers; deactivation is terminal (no
+  // unsuspend) and no restore spec matches an unmarked row, so it is public,
+  // searchable, and orderable permanently — inventory of a banned user.
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", true);
+
+  const staleRead = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(staleRead.allowed, true);
+
+  // Deactivation completes WITHOUT the lock first: flip + unfiltered hide
+  // (nothing publicly visible at that moment, so the hide touches nothing).
+  store.seedSellerProfile("s1", false);
+  assert.equal(store.applySpec({ where: { sellerId: "s1" }, data: { isAvailable: false } }), 0);
+
+  // Naive insert from the stale decision (skip the re-check): the row lands
+  // after the hide ran — public and unmarked, owned by a deactivated seller.
+  store.seedListing({ id: "l-new", sellerId: "s1", isAvailable: true });
+  const publicIds = [...store.listings.values()]
+    .filter((l) => whereMatches(l, PUBLIC_LISTING_CONDITION, store.sellerProfiles))
+    .map((l) => l.id);
+  assert.deepEqual(publicIds, ["l-new"], "the gap: a public, unmarked listing of a deactivated seller");
+
+  // Permanence: neither restore spec can re-list it — the suspension restore
+  // requires a marker the row does not carry, and the subscription-activation
+  // restore requires both a flag the row does not carry and an ACTIVE seller.
+  assert.equal(store.applySpec(sellerSuspensionRestoreSpec("s1")), 0);
+  assert.equal(store.applySpec(subscriptionActivationRestoreSpec("s1")), 0);
+});
+
 // ---------------------------------------------------------------------------
 // decideListingDeletion + delete guard — explicit retention policy
 // ---------------------------------------------------------------------------
