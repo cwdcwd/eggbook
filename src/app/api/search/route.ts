@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
+import { PUBLIC_LISTING_CONDITION } from "@/lib/listing-policy";
 
 // Maximum number of results per request
 const MAX_LIMIT = 100;
@@ -55,8 +56,7 @@ export async function GET(req: NextRequest) {
       isActive: true,
       listings: {
         some: {
-          isAvailable: true,
-          hiddenBySubscription: false,
+          ...PUBLIC_LISTING_CONDITION,
         },
       },
     };
@@ -79,8 +79,7 @@ export async function GET(req: NextRequest) {
                 { description: { contains: q, mode: "insensitive" } },
                 { tags: { some: { name: { contains: q, mode: "insensitive" } } } },
               ],
-              isAvailable: true,
-              hiddenBySubscription: false,
+              ...PUBLIC_LISTING_CONDITION,
             },
           },
         },
@@ -91,8 +90,7 @@ export async function GET(req: NextRequest) {
     if (tags.length > 0) {
       sellerWhere.listings = {
         some: {
-          isAvailable: true,
-          hiddenBySubscription: false,
+          ...PUBLIC_LISTING_CONDITION,
           tags: {
             some: { slug: { in: tags } },
           },
@@ -109,8 +107,7 @@ export async function GET(req: NextRequest) {
     if (minPrice !== null || maxPrice !== null) {
       sellerWhere.listings = {
         some: {
-          isAvailable: true,
-          hiddenBySubscription: false,
+          ...PUBLIC_LISTING_CONDITION,
           ...(minPrice !== null && { pricePerUnit: { gte: minPrice } }),
           ...(maxPrice !== null && { pricePerUnit: { lte: maxPrice } }),
           ...(tags.length > 0 && { tags: { some: { slug: { in: tags } } } }),
@@ -127,8 +124,7 @@ export async function GET(req: NextRequest) {
         },
         listings: {
           where: {
-            isAvailable: true,
-            hiddenBySubscription: false,
+            ...PUBLIC_LISTING_CONDITION,
             ...(minPrice !== null && { pricePerUnit: { gte: minPrice } }),
             ...(maxPrice !== null && { pricePerUnit: { lte: maxPrice } }),
             ...(tags.length > 0 && { tags: { some: { slug: { in: tags } } } }),
@@ -231,8 +227,7 @@ export async function GET(req: NextRequest) {
       where: {
         listings: {
           some: {
-            isAvailable: true,
-            hiddenBySubscription: false,
+            ...PUBLIC_LISTING_CONDITION,
           },
         },
       },

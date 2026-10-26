@@ -128,8 +128,20 @@ export default async function ListingsPage() {
                   </div>
                 )}
                 <div className="absolute top-2 right-2">
-                  <Badge variant={listing.isAvailable ? "success" : "warning"}>
-                    {listing.isAvailable ? "Available" : "Unavailable"}
+                  <Badge
+                    variant={
+                      listing.hiddenBySubscription || listing.hiddenBySuspension || !listing.isAvailable
+                        ? "warning"
+                        : "success"
+                    }
+                  >
+                    {listing.hiddenBySubscription
+                      ? "Hidden by subscription"
+                      : listing.hiddenBySuspension
+                      ? "Hidden by suspension"
+                      : listing.isAvailable
+                      ? "Available"
+                      : "Unavailable"}
                   </Badge>
                 </div>
               </div>

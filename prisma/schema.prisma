@@ -103,6 +103,10 @@ model EggListing {
   stockCount             Int      @default(0)
   isAvailable            Boolean  @default(true)
   hiddenBySubscription   Boolean  @default(false) // True if hidden due to subscription expiry
+  // True if hidden because the seller account was suspended (or the role
+  // changed away from SELLER). Owned by the admin suspend/unsuspend paths;
+  // restore-on-unsuspend re-lists exactly the rows carrying this marker.
+  hiddenBySuspension     Boolean  @default(false)
   photos                 String[] // Array of Vercel Blob URLs
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
