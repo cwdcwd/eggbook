@@ -129,14 +129,20 @@ export default function OrdersPage() {
   }, []);
 
   useEffect(() => {
-    fetchOrders();
+    queueMicrotask(() => {
+      fetchOrders();
+    });
   }, [filter, fetchOrders]);
 
   useEffect(() => {
     if (selectedOrder) {
-      fetchOrderHistory(selectedOrder.id);
+      queueMicrotask(() => {
+        fetchOrderHistory(selectedOrder.id);
+      });
     } else {
-      setOrderHistory([]);
+      queueMicrotask(() => {
+        setOrderHistory([]);
+      });
     }
   }, [selectedOrder, fetchOrderHistory]);
 

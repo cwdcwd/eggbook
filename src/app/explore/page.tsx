@@ -54,6 +54,37 @@ interface Seller {
   user: { username: string };
 }
 
+// Raw payload shape returned by /api/search (before client-side mapping)
+interface ApiSearchListing {
+  id: string;
+  title: string;
+  description: string | null;
+  pricePerUnit: number;
+  unit: string;
+  photos: string[];
+  tags: Tag[];
+}
+
+interface ApiSearchSeller {
+  id: string;
+  username: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  city: string;
+  state: string;
+  lat: number | null;
+  lng: number | null;
+  maxDeliveryDistance: number | null;
+  isActive: boolean;
+  minPrice: number | null;
+  distance: number | null;
+  canDeliver: boolean;
+  listings: ApiSearchListing[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 function ExploreContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -123,11 +154,11 @@ function ExploreContent() {
       if (res.ok) {
         const data = await res.json();
         // Map API response to component format
-        const mappedSellers = data.sellers.map((s: any) => ({
+        const mappedSellers = data.sellers.map((s: ApiSearchSeller) => ({
           ...s,
           user: { username: s.username },
           distance: s.distance ?? undefined, // Convert null to undefined
-          listings: s.listings.map((l: any) => ({
+          listings: s.listings.map((l: ApiSearchListing) => ({
             ...l,
             tags: l.tags || [],
           })),
@@ -249,7 +280,7 @@ function ExploreContent() {
       .then((res) => res.ok ? res.json() : [])
       .then((data) => {
         if (Array.isArray(data)) {
-          setFavorites(data.map((f: any) => f.sellerProfileId));
+          setFavorites(data.map((f: { sellerProfileId: string }) => f.sellerProfileId));
         }
       })
       .catch(() => {});

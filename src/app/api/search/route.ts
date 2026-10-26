@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
 import { PUBLIC_LISTING_CONDITION } from "@/lib/listing-policy";
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), MAX_LIMIT) : 50;
 
     // Build the where clause for sellers
-    const sellerWhere: any = {
+    const sellerWhere: Prisma.SellerProfileWhereInput = {
       isActive: true,
       listings: {
         some: {

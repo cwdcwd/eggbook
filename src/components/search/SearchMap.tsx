@@ -79,6 +79,9 @@ const userIcon = L.divIcon({
   iconAnchor: [10, 10],
 });
 
+// Markers tagged with `_isUserMarker` are the "You are here" marker.
+type UserMarkedMarker = L.Marker & { _isUserMarker?: boolean };
+
 export function SearchMap({ sellers, userLocation, onSellerClick, className }: SearchMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -113,14 +116,14 @@ export function SearchMap({ sellers, userLocation, onSellerClick, className }: S
 
     if (userLocation) {
       // Add or update user marker
-      const existingUserMarker = markersRef.current.find((m) => (m as any)._isUserMarker);
+      const existingUserMarker = markersRef.current.find((m) => (m as UserMarkedMarker)._isUserMarker);
       if (existingUserMarker) {
         existingUserMarker.setLatLng([userLocation.lat, userLocation.lng]);
       } else {
         const marker = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon })
           .addTo(mapRef.current)
           .bindPopup("You are here");
-        (marker as any)._isUserMarker = true;
+        (marker as UserMarkedMarker)._isUserMarker = true;
         markersRef.current.push(marker);
       }
 
@@ -134,7 +137,7 @@ export function SearchMap({ sellers, userLocation, onSellerClick, className }: S
 
     // Remove old seller markers (keep user marker)
     markersRef.current = markersRef.current.filter((marker) => {
-      if ((marker as any)._isUserMarker) return true;
+      if ((marker as UserMarkedMarker)._isUserMarker) return true;
       marker.remove();
       return false;
     });

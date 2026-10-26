@@ -112,7 +112,7 @@ export default async function ListingsPage() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {listings.map((listing: any) => (
+          {listings.map((listing) => (
             <Card key={listing.id} className="overflow-hidden">
               <div className="aspect-video relative bg-amber-100">
                 {listing.photos?.[0] ? (
