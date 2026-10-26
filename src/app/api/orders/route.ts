@@ -40,12 +40,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
-    // Visibility + stock rule (pure core): subscription-hidden listings must
-    // not be sellable — ordering one would leak a listing the expiry webhook hid.
+    // Visibility + stock rule (pure core): subscription-hidden and
+    // suspension-hidden listings must not be sellable — ordering one would
+    // leak a listing the expiry webhook or an admin suspension hid.
     const placement = decideOrderPlacement(
       {
         isAvailable: listing.isAvailable,
         hiddenBySubscription: listing.hiddenBySubscription,
+        hiddenBySuspension: listing.hiddenBySuspension,
         stockCount: listing.stockCount,
       },
       quantity

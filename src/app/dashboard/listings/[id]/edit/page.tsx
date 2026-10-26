@@ -48,6 +48,7 @@ export default function EditListingPage({
   const [pricingUnit, setPricingUnit] = useState("DOZEN");
   const [isAvailable, setIsAvailable] = useState(true);
   const [hiddenBySubscription, setHiddenBySubscription] = useState(false);
+  const [hiddenBySuspension, setHiddenBySuspension] = useState(false);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -97,6 +98,7 @@ export default function EditListingPage({
         setPricingUnit(listing.unit || "DOZEN");
         setIsAvailable(listing.isAvailable ?? true);
         setHiddenBySubscription(listing.hiddenBySubscription ?? false);
+        setHiddenBySuspension(listing.hiddenBySuspension ?? false);
       } catch (error) {
         console.error("Failed to load listing:", error);
         alert("Failed to load listing");
@@ -241,6 +243,14 @@ export default function EditListingPage({
                     View Plans
                   </Button>
                 </Link>
+              </div>
+            ) : hiddenBySuspension ? (
+              <div className="space-y-2">
+                <Badge variant="warning">Hidden by suspension</Badge>
+                <p className="text-sm text-amber-700">
+                  This listing is hidden from buyers because your seller account is suspended.
+                  It can be re-listed once the account is restored — its details can still be edited here.
+                </p>
               </div>
             ) : (
               <label className="flex items-center gap-3 cursor-pointer">

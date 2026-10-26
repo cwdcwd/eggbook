@@ -3,6 +3,10 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { verifyAdmin } from "@/lib/auth";
 import { AdminUserActionSchema } from "@/lib/schemas";
+import {
+  sellerSuspensionHideSpec,
+  sellerSuspensionRestoreSpec,
+} from "@/lib/listing-policy";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -47,35 +51,81 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
 
     switch (action) {
-      case "suspend":
-        // Deactivate seller profile if exists
+      case "suspend": {
+        // Server-side entitlement enforcement: suspending a seller also takes
+        // their publicly visible listings off the market with the suspension
+        // marker (hiddenBySuspension), so buyers can no longer fetch, order,
+        // or favorite them through public paths. Rows the subscription
+        // webhook hid and rows the seller deliberately paused are untouched,
+        // so unsuspend restores exactly what the suspension hid.
         if (targetUser.sellerProfile) {
-          await db.sellerProfile.update({
-            where: { id: targetUser.sellerProfile.id },
-            data: { isActive: false },
+          await db.$transaction(async (tx) => {
+            await tx.sellerProfile.update({
+              where: { id: targetUser.sellerProfile!.id },
+              data: { isActive: false },
+            });
+            await tx.eggListing.updateMany(
+              sellerSuspensionHideSpec(targetUser.sellerProfile!.id)
+            );
           });
         }
         return NextResponse.json({ success: true, message: "User suspended" });
+      }
 
-      case "unsuspend":
-        // Reactivate seller profile if exists
+      case "unsuspend": {
+        // Reactivate the profile and re-list exactly the rows the suspension
+        // hid (sellerSuspensionRestoreSpec matches the marker only): a
+        // subscription-hidden listing stays hidden (the activation webhook
+        // owns that flag) and a seller-paused listing stays paused.
         if (targetUser.sellerProfile) {
-          await db.sellerProfile.update({
-            where: { id: targetUser.sellerProfile.id },
-            data: { isActive: true },
+          await db.$transaction(async (tx) => {
+            await tx.sellerProfile.update({
+              where: { id: targetUser.sellerProfile!.id },
+              data: { isActive: true },
+            });
+            await tx.eggListing.updateMany(
+              sellerSuspensionRestoreSpec(targetUser.sellerProfile!.id)
+            );
           });
         }
         return NextResponse.json({ success: true, message: "User unsuspended" });
+      }
 
-      case "change_role":
+      case "change_role": {
         if (!role) {
           return NextResponse.json({ error: "Role is required" }, { status: 400 });
         }
-        await db.user.update({
-          where: { id },
-          data: { role },
+        // Role changes away from SELLER carry the same entitlement policy as
+        // suspension (hide with the marker); restoring the SELLER role is a
+        // restore event (reactivate the profile, re-list exactly the marked
+        // rows). No seller profile → only the role itself changes.
+        const leavingSeller = role !== "SELLER" && !!targetUser.sellerProfile;
+        const becomingSeller = role === "SELLER" && !!targetUser.sellerProfile;
+        await db.$transaction(async (tx) => {
+          await tx.user.update({
+            where: { id },
+            data: { role },
+          });
+          if (leavingSeller) {
+            await tx.sellerProfile.update({
+              where: { id: targetUser.sellerProfile!.id },
+              data: { isActive: false },
+            });
+            await tx.eggListing.updateMany(
+              sellerSuspensionHideSpec(targetUser.sellerProfile!.id)
+            );
+          } else if (becomingSeller) {
+            await tx.sellerProfile.update({
+              where: { id: targetUser.sellerProfile!.id },
+              data: { isActive: true },
+            });
+            await tx.eggListing.updateMany(
+              sellerSuspensionRestoreSpec(targetUser.sellerProfile!.id)
+            );
+          }
         });
         return NextResponse.json({ success: true, message: `Role changed to ${role}` });
+      }
 
       default:
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
@@ -118,17 +168,20 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
     }
 
-    // Deactivate seller profile if exists
+    // Deactivation is terminal (no restore action) — listings are taken off
+    // the market without the suspension marker so no future unsuspend can
+    // silently re-list a deactivated user's inventory.
     if (targetUser.sellerProfile) {
-      await db.sellerProfile.update({
-        where: { id: targetUser.sellerProfile.id },
-        data: { isActive: false },
-      });
+      await db.$transaction(async (tx) => {
+        await tx.sellerProfile.update({
+          where: { id: targetUser.sellerProfile!.id },
+          data: { isActive: false },
+        });
 
-      // Deactivate all listings
-      await db.eggListing.updateMany({
-        where: { sellerId: targetUser.sellerProfile.id },
-        data: { isAvailable: false },
+        await tx.eggListing.updateMany({
+          where: { sellerId: targetUser.sellerProfile!.id },
+          data: { isAvailable: false },
+        });
       });
     }
 

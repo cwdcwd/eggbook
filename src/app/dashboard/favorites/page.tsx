@@ -37,15 +37,15 @@ async function getFavorites(clerkId: string): Promise<SellerWithRelations[]> {
     include: {
       user: true,
       listings: {
-        // Public visibility rule: subscription-hidden listings must not
-        // surface on saved-seller cards.
-        where: { isAvailable: true, hiddenBySubscription: false },
+        // Public visibility rule: subscription-hidden and suspension-hidden
+        // listings must not surface on saved-seller cards.
+        where: { isAvailable: true, hiddenBySubscription: false, hiddenBySuspension: false },
         take: 1,
       },
       _count: {
         select: {
           listings: {
-            where: { isAvailable: true, hiddenBySubscription: false },
+            where: { isAvailable: true, hiddenBySubscription: false, hiddenBySuspension: false },
           },
         },
       },

@@ -5,6 +5,7 @@ import { PricingUnit } from "@prisma/client";
 import { getOrCreateUser } from "@/lib/auth";
 import { canCreateListing } from "@/lib/subscription";
 import { CreateListingSchema } from "@/lib/schemas";
+import { decideListingCapCreate } from "@/lib/listing-policy";
 
 // Create a new listing
 export async function POST(req: NextRequest) {
@@ -29,7 +30,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // DB check for listing limits only (not subscription status)
+    // DB check for listing limits only (not subscription status). Fast-fail
+    // only — the authoritative check re-runs inside the create transaction
+    // below, where concurrent creates by the same seller cannot interleave.
     const dbCheck = await canCreateListing(userId);
     if (!dbCheck.allowed) {
       return NextResponse.json(
@@ -89,28 +92,72 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // Create listing
-    const listing = await db.eggListing.create({
-      data: {
-        sellerId: sellerProfile.id,
-        title: title.trim(),
-        description: description?.trim() || null,
-        pricePerUnit,
-        unit: unit as PricingUnit,
-        customUnitName: unit === "CUSTOM" ? customUnitName ?? null : null,
-        customUnitQty: unit === "CUSTOM" ? customUnitQty ?? null : null,
-        stockCount: stockCount || 0,
-        photos: photos || [],
-        tags: {
-          connect: tagConnections,
+    // Create inside a per-seller-serialized transaction. The advisory lock
+    // makes {re-read the limit, count the listings, insert} a critical
+    // section: a concurrent create by the same seller cannot interleave its
+    // own count between this transaction's count and insert, which a plain
+    // count-then-create would allow (both pass, both insert, cap exceeded).
+    // The pure decision runs against the in-transaction count.
+    const outcome = await db.$transaction(async (tx) => {
+      // Two-int form keeps the lock namespaced away from any other hashtext
+      // advisory use; keying on the seller profile serializes only this
+      // seller's creates. Released automatically at transaction end.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`listing-cap:${sellerProfile.id}`}), 0)`;
+
+      const fresh = await tx.user.findUnique({
+        where: { id: user.id },
+        select: {
+          listingLimit: true,
+          sellerProfile: {
+            select: { _count: { select: { listings: true } } },
+          },
         },
-      },
-      include: {
-        tags: true,
-      },
+      });
+      if (!fresh) {
+        return { kind: "USER_NOT_FOUND" as const };
+      }
+
+      const cap = decideListingCapCreate(
+        fresh.sellerProfile?._count.listings ?? 0,
+        fresh.listingLimit
+      );
+      if (!cap.allowed) {
+        return { kind: "LISTING_LIMIT_REACHED" as const, reason: cap.message };
+      }
+
+      const listing = await tx.eggListing.create({
+        data: {
+          sellerId: sellerProfile.id,
+          title: title.trim(),
+          description: description?.trim() || null,
+          pricePerUnit,
+          unit: unit as PricingUnit,
+          customUnitName: unit === "CUSTOM" ? customUnitName ?? null : null,
+          customUnitQty: unit === "CUSTOM" ? customUnitQty ?? null : null,
+          stockCount: stockCount || 0,
+          photos: photos || [],
+          tags: {
+            connect: tagConnections,
+          },
+        },
+        include: {
+          tags: true,
+        },
+      });
+      return { kind: "CREATED" as const, listing };
     });
 
-    return NextResponse.json(listing, { status: 201 });
+    if (outcome.kind === "USER_NOT_FOUND") {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    if (outcome.kind === "LISTING_LIMIT_REACHED") {
+      return NextResponse.json(
+        { error: outcome.reason, code: "LISTING_LIMIT_REACHED" },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json(outcome.listing, { status: 201 });
   } catch (error) {
     console.error("Error creating listing:", error);
     return NextResponse.json({ error: "Failed to create listing" }, { status: 500 });

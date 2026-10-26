@@ -27,6 +27,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
     const listing = await db.eggListing.findUnique({
       where: { id },
+      include: { seller: { select: { isActive: true } } },
     });
 
     if (!listing) {
@@ -42,9 +43,24 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         return NextResponse.json({ success: true, message: "Listing disabled" });
 
       case "enable":
-        // Admin enable restores public visibility for BOTH hidden reasons:
-        // clearing hiddenBySubscription keeps the expiry webhook's flag from
-        // fighting the admin's decision (expiry will re-set it on next fire).
+        // Admin enable restores public visibility for the subscription-hidden
+        // reason: clearing hiddenBySubscription keeps the expiry webhook's
+        // flag from fighting the admin's decision (expiry re-sets it on next
+        // fire). BUT a suspended/inactive seller's listings stay hidden: the
+        // unsuspend action owns restoring suspension-marker rows, the same
+        // way the activation webhook owns restoring hiddenBySubscription
+        // rows — so enable refuses instead of either violating the seller
+        // suspension outright or silently re-listing one row of a hidden
+        // seller.
+        if (listing.seller && !listing.seller.isActive) {
+          return NextResponse.json(
+            {
+              error: "Seller account is suspended; unsuspend the seller before enabling listings",
+              code: "SELLER_SUSPENDED",
+            },
+            { status: 409 }
+          );
+        }
         await db.eggListing.update({
           where: { id },
           data: { isAvailable: true, hiddenBySubscription: false },
@@ -83,25 +99,42 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
-    // Check for active orders (shared lifecycle rule)
-    const activeOrders = await db.order.count({
-      where: {
-        listingId: id,
-        status: { in: [...ACTIVE_ORDER_STATUSES] },
-      },
+    // Same locked-transaction retention policy as the seller DELETE: the row
+    // lock serializes concurrent order creation, and the retention decision
+    // runs against counts read inside the lock. ACTIVE orders → 400; any
+    // historical order → 409; no coded path can ever hit the RESTRICT FK.
+    const outcome = await db.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "EggListing" WHERE "id" = ${id} FOR UPDATE`;
+      if (locked.length === 0) {
+        return { kind: "NOT_FOUND" as const };
+      }
+
+      const [totalOrderCount, activeOrderCount] = await Promise.all([
+        tx.order.count({ where: { listingId: id } }),
+        tx.order.count({
+          where: { listingId: id, status: { in: [...ACTIVE_ORDER_STATUSES] } },
+        }),
+      ]);
+
+      const deletion = decideListingDeletion(totalOrderCount, activeOrderCount);
+      if (!deletion.allowed) {
+        return { kind: "BLOCKED" as const, code: deletion.code, message: deletion.message };
+      }
+
+      await tx.eggListing.delete({ where: { id } });
+      return { kind: "DELETED" as const };
     });
 
-    if (!decideListingDeletion(activeOrders).allowed) {
+    if (outcome.kind === "NOT_FOUND") {
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
+    if (outcome.kind === "BLOCKED") {
       return NextResponse.json(
-        { error: "Cannot delete listing with active orders. Disable it instead.", code: "LISTING_HAS_ACTIVE_ORDERS" },
-        { status: 400 }
+        { error: outcome.message, code: outcome.code },
+        { status: outcome.code === "LISTING_HAS_ACTIVE_ORDERS" ? 400 : 409 }
       );
     }
-
-    // Delete listing
-    await db.eggListing.delete({
-      where: { id },
-    });
 
     return NextResponse.json({ success: true, message: "Listing deleted" });
   } catch (error) {
