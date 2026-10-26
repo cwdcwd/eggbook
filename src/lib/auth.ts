@@ -1,5 +1,6 @@
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
+import { syncClerkUser } from './clerk-user-lifecycle'
 
 /**
  * Verify admin access using Clerk session claims.
@@ -21,35 +22,35 @@ export async function verifyAdmin(): Promise<boolean> {
  * Handles the case where Clerk webhook hasn't synced the user yet.
  */
 export async function getOrCreateUser(clerkUserId: string) {
-  let user = await db.user.findUnique({
+  const user = await db.user.findUnique({
     where: { clerkId: clerkUserId },
     include: { sellerProfile: true },
   });
 
-  if (!user) {
-    // User not in DB yet - fetch from Clerk and create
-    const clerkUser = await currentUser();
-    if (!clerkUser) {
-      return null;
-    }
+  if (user) return user;
 
-    const email = clerkUser.emailAddresses[0]?.emailAddress;
-    if (!email) {
-      return null;
-    }
-
-    user = await db.user.create({
-      data: {
-        clerkId: clerkUserId,
-        email,
-        username: clerkUser.username || email.split("@")[0],
-        role: "BUYER",
-      },
-      include: { sellerProfile: true },
-    });
+  // User not in DB yet - fetch from Clerk and create
+  const clerkUser = await currentUser();
+  if (!clerkUser) {
+    return null;
   }
 
-  return user;
+  const email = clerkUser.emailAddresses[0]?.emailAddress;
+  if (!email) {
+    return null;
+  }
+
+  // Shared sync honors tombstones and identity-conflict rules before creating.
+  const synced = await syncClerkUser({
+    id: clerkUserId,
+    username: clerkUser.username,
+    emailAddresses: clerkUser.emailAddresses.map(({ emailAddress }) => ({ emailAddress })),
+  });
+  if (!synced) return null;
+  return db.user.findUnique({
+    where: { clerkId: clerkUserId },
+    include: { sellerProfile: true },
+  });
 }
 
 export async function getCurrentUser() {
@@ -88,16 +89,7 @@ export async function syncUserFromClerk(clerkUser: {
   const email = clerkUser.emailAddresses[0]?.emailAddress
   if (!email) throw new Error('No email found')
 
-  const username = clerkUser.username || email.split('@')[0]
-
-  return db.user.upsert({
-    where: { clerkId: clerkUser.id },
-    update: { email, username },
-    create: {
-      clerkId: clerkUser.id,
-      email,
-      username,
-      role: 'BUYER',
-    },
-  })
+  const user = await syncClerkUser(clerkUser)
+  if (!user) throw new Error('User could not be synchronized')
+  return db.user.findUniqueOrThrow({ where: { clerkId: clerkUser.id } })
 }

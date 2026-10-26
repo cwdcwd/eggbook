@@ -33,6 +33,10 @@ model User {
   conversations1 Conversation[]  @relation("Buyer")
   conversations2 Conversation[]  @relation("Seller")
   messages       Message[]
+
+  /// Set when the account is anonymized by Clerk user.deleted lifecycle.
+  deletedAt DateTime?
+
 }
 
 enum UserRole {
@@ -229,6 +233,11 @@ model Message {
 }
 
 // Favorites
+model ClerkUserTombstone {
+  clerkId   String   @id
+  deletedAt DateTime @default(now())
+}
+
 model Favorite {
   id               String @id @default(cuid())
   userId           String

@@ -2,6 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { syncClerkUser, deleteClerkUser } from "@/lib/clerk-user-lifecycle";
 
 import {
   handleSubscriptionActivation,
@@ -48,57 +49,25 @@ export async function POST(req: Request) {
   // Handle events
   const eventType = evt.type;
 
-  if (eventType === "user.created") {
-    const { id, email_addresses, username } = evt.data;
-    const email = email_addresses[0]?.email_address;
-
-    if (!email) {
-      return new Response("Error: No email address", { status: 400 });
-    }
-
-    await db.user.create({
-      data: {
-        clerkId: id,
-        email,
-        username: username || email.split("@")[0],
-        role: "BUYER",
-      },
-    });
-  }
-
-  if (eventType === "user.updated") {
+  if (eventType === "user.created" || eventType === "user.updated") {
     const { id, email_addresses, username, image_url } = evt.data;
-    const email = email_addresses[0]?.email_address;
+    const user = await syncClerkUser({
+      id,
+      username,
+      emailAddresses: email_addresses.map(({ email_address }) => ({ emailAddress: email_address })),
+    });
 
-    if (email) {
-      // Update user
-      const user = await db.user.update({
-        where: { clerkId: id },
-        data: {
-          email,
-          username: username || email.split("@")[0],
-        },
-        include: { sellerProfile: true },
-      });
-
-      // Sync Clerk avatar to seller profile only if no custom avatar set
-      if (user.sellerProfile && image_url && !user.sellerProfile.avatarUrl) {
-        await db.sellerProfile.update({
-          where: { id: user.sellerProfile.id },
-          data: { avatarUrl: image_url },
-        });
+    if (user && image_url) {
+      const sellerProfile = await db.sellerProfile.findUnique({ where: { userId: user.id } });
+      if (sellerProfile && !sellerProfile.avatarUrl) {
+        await db.sellerProfile.update({ where: { id: sellerProfile.id }, data: { avatarUrl: image_url } });
       }
     }
   }
 
   if (eventType === "user.deleted") {
     const { id } = evt.data;
-
-    if (id) {
-      await db.user.delete({
-        where: { clerkId: id },
-      });
-    }
+    if (id) await deleteClerkUser(id);
   }
 
   // Subscription events (Clerk Billing)
