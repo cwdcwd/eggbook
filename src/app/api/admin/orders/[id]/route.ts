@@ -1,9 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { verifyAdmin } from "@/lib/auth";
 import { AdminOrderStatusSchema } from "@/lib/schemas";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { expireCheckoutSession } from "@/lib/stripe";
+import { nextAdminStatus, type AdminStatusRejectionCode } from "@/lib/payment-integrity";
+import { runGuardedOrderTransition } from "@/lib/order-transition";
+import { Prisma } from "@prisma/client";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -75,6 +79,19 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
+    const rejectionMessages: Record<AdminStatusRejectionCode, string> = {
+      terminal: "Order is in a terminal status and cannot be overridden",
+      "payment-transition-forbidden": "Paid orders cannot be cancelled — refund via the admin refund endpoint",
+    };
+
+    const rule = nextAdminStatus(order.status, status, Boolean(order.stripePaymentId));
+    if (!rule.allowed) {
+      return NextResponse.json(
+        { error: rejectionMessages[rule.code] },
+        { status: 409 }
+      );
+    }
+
     const updateData: Record<string, unknown> = { status };
 
     const reason = cancelReason || `Admin status override to ${status}`;
@@ -86,50 +103,97 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       updateData.completedAt = new Date();
     }
 
-    const updatedOrder = await db.$transaction(async (tx) => {
-      // Read current status inside transaction for accurate audit trail
-      const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
-      if (!current) {
-        return null;
-      }
+    // The session-expiry hook only RECORDS inside the transaction and is
+    // dispatched after the response, so a rollback can never leave an expiry
+    // scheduled for an order that was not actually cancelled.
+    let expireSessionId: string | null = null;
 
-      const updated = await tx.order.update({
-        where: { id },
-        data: updateData,
-        include: {
-          listing: true,
-          buyer: true,
-          seller: { include: { user: true } },
-        },
-      });
-
-      // Restore stock only when transitioning FROM a non-terminal/non-fulfilled status
-      const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
-      if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !noRestoreStatuses.includes(current.status)) {
-        await tx.eggListing.update({
-          where: { id: order.listingId },
-          data: { stockCount: { increment: order.quantity } },
-        });
-      }
-
-      await logOrderStatusChange({
+    const result = await db.$transaction(async (tx) =>
+      runGuardedOrderTransition({
         orderId: id,
-        fromStatus: current.status,
-        toStatus: status,
-        changedBy: userId,
-        changedByType: "ADMIN",
-        reason,
-        tx,
-      });
+        ports: {
+          // Read current state inside transaction; the override decision is
+          // re-validated against it so a concurrent payment can't be overwritten.
+          findCurrent: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              select: { status: true, stripePaymentId: true },
+            }),
+          applyTransition: (spec) =>
+            tx.order
+              .updateMany({
+                where: { id: spec.where.id, status: spec.where.status },
+                data: spec.data as Prisma.OrderUpdateManyArgs["data"],
+              })
+              .then((res) => res.count),
+          readAfterTransition: (orderId) =>
+            tx.order.findUniqueOrThrow({
+              where: { id: orderId },
+              include: {
+                listing: true,
+                buyer: true,
+                seller: { include: { user: true } },
+              },
+            }),
+          expireSession: (sessionId) => {
+            expireSessionId = sessionId;
+            return Promise.resolve();
+          },
+        },
+        plan: (current) => {
+          const currentRule = nextAdminStatus(current.status, status, Boolean(current.stripePaymentId));
+          if (!currentRule.allowed) {
+            return null; // becomes the shared conflict outcome
+          }
+          return {
+            toStatus: status,
+            data: updateData,
+          };
+        },
+        onApplied: async ({ current, plan: appliedPlan }) => {
+          // Restore stock only when transitioning FROM a non-fulfilled status
+          const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
+          if (
+            (appliedPlan.toStatus === "CANCELLED" || appliedPlan.toStatus === "DECLINED") &&
+            order.listingId &&
+            !noRestoreStatuses.includes(current.status)
+          ) {
+            await tx.eggListing.update({
+              where: { id: order.listingId },
+              data: { stockCount: { increment: order.quantity } },
+            });
+          }
 
-      return updated;
-    });
+          await logOrderStatusChange({
+            orderId: id,
+            fromStatus: current.status,
+            toStatus: status,
+            changedBy: userId,
+            changedByType: "ADMIN",
+            reason,
+            tx,
+          });
+        },
+      })
+    );
 
-    if (!updatedOrder) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    if (!result.applied) {
+      return NextResponse.json(
+        { error: "Order was updated concurrently; please reload and retry" },
+        { status: 409 }
+      );
     }
 
-    return NextResponse.json(updatedOrder);
+    // Eligible cancellation: the session snapshot taken AFTER the successful
+    // CAS (see the flow module) must no longer be payable.
+    if (expireSessionId) {
+      const sessionId = expireSessionId;
+      after(async () => {
+        await expireCheckoutSession(sessionId);
+      });
+    }
+
+    return NextResponse.json(result.row);
   } catch (error) {
     console.error("Error updating order:", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });

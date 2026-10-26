@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
+      - run: npm test
       - run: npm run build
 
   # Auto-merge Dependabot minor/patch PRs once the checks above pass

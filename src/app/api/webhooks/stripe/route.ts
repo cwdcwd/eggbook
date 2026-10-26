@@ -5,9 +5,113 @@ import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { notifyUser } from "@/lib/beams-server";
+import {
+  applyCumulativeRefund,
+  paymentEventAction,
+  type RefundReconciliation,
+} from "@/lib/payment-integrity";
+import { applyRefundReconciliation } from "@/lib/refund-reconciliation";
 
 
 // --- Shared business logic helpers ---
+
+interface PaymentAttachResult {
+  attached: boolean;
+  advanced: boolean;
+}
+
+/**
+ * Record a successful payment on an order, concurrency-safe:
+ * - attaches stripePaymentId/paidAt with a compare-and-set on the freshly
+ *   re-read status (bounded retries honour concurrent manual transitions),
+ * - only advances CONFIRMED → PAID,
+ * - never resurrects cancelled/declined orders (late/duplicate events skip),
+ * - an order that already has stripePaymentId short-circuits as idempotent.
+ */
+async function recordSuccessfulPayment(
+  orderId: string,
+  paymentIntentId: string,
+  eventId: string,
+  source: string
+): Promise<PaymentAttachResult | null> {
+  if (!orderId) return null;
+  if (!paymentIntentId) {
+    console.log(`[stripe-webhook] ${source} for order ${orderId} has no payment intent — skipping`);
+    return null;
+  }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existingOrder = await db.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, stripePaymentId: true },
+    });
+
+    if (!existingOrder) {
+      console.log(`[stripe-webhook] Order ${orderId} not found — skipping`);
+      return null;
+    }
+
+    if (existingOrder.stripePaymentId) {
+      console.log(`[stripe-webhook] Order ${orderId} payment already recorded — skipping (idempotent)`);
+      return null;
+    }
+
+    const action = paymentEventAction(existingOrder.status);
+    if (action === "skip") {
+      console.log(
+        `[stripe-webhook] Order ${orderId} status is ${existingOrder.status} — not attaching payment (${source})`
+      );
+      return null;
+    }
+
+    // Compare-and-set on the freshly-read status: a concurrent transition
+    // (seller confirm/cancel, refund) makes this a no-op and we re-read.
+    const updated = await db.order.updateMany({
+      where: { id: orderId, stripePaymentId: null, status: existingOrder.status },
+      data: {
+        ...(action === "attach-and-advance" && { status: "PAID" }),
+        stripePaymentId: paymentIntentId,
+        paidAt: new Date(),
+      },
+    });
+
+    if (updated.count > 0) {
+      if (action === "attach-and-advance") {
+        await logOrderStatusChange({
+          orderId,
+          fromStatus: "CONFIRMED",
+          toStatus: "PAID",
+          changedByType: "SYSTEM",
+          reason: "Payment completed via Stripe",
+          metadata: {
+            stripeEventId: eventId,
+            source,
+            stripePaymentIntentId: paymentIntentId,
+          },
+        });
+      } else {
+        await logOrderStatusChange({
+          orderId,
+          fromStatus: existingOrder.status,
+          toStatus: existingOrder.status,
+          changedByType: "SYSTEM",
+          reason: "Payment identifier attached to already-paid order",
+          metadata: {
+            stripeEventId: eventId,
+            source,
+            stripePaymentIntentId: paymentIntentId,
+          },
+        });
+      }
+      return { attached: true, advanced: action === "attach-and-advance" };
+    }
+  }
+
+  console.log(
+    `[stripe-webhook] Order ${orderId} was updated concurrently; payment ${paymentIntentId} not attached — manual reconciliation may be needed`
+  );
+  return null;
+}
 
 async function handleCheckoutCompleted(
   session: Stripe.Checkout.Session,
@@ -16,56 +120,16 @@ async function handleCheckoutCompleted(
   const orderId = session.metadata?.orderId;
   console.log(`[stripe-webhook] checkout.session.completed - orderId: ${orderId}`);
 
-  if (!orderId) return;
+  const result = await recordSuccessfulPayment(
+    orderId!,
+    session.payment_intent as string,
+    eventId,
+    "checkout.session.completed"
+  );
+  if (!result?.attached) return;
 
-  // Only transition from CONFIRMED → PAID (the expected pre-payment status)
-  // If the seller has already manually advanced the order (PAID/COMPLETED),
-  // still record Stripe payment details but don't change the status
-  const existingOrder = await db.order.findUnique({
-    where: { id: orderId },
-    select: { status: true, stripePaymentId: true },
-  });
-
-  if (!existingOrder) {
-    console.log(`[stripe-webhook] Order ${orderId} not found — skipping`);
-    return;
-  }
-
-  const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
-  if (!validStatuses.includes(existingOrder.status)) {
-    console.log(`[stripe-webhook] Order ${orderId} status is ${existingOrder.status}, not in ${validStatuses.join("/")} — skipping`);
-    return;
-  }
-
-  // Atomically set stripePaymentId only if not already set (idempotency guard).
-  // This ensures volume/notification logic runs exactly once per payment.
-  const updated = await db.order.updateMany({
-    where: { id: orderId, stripePaymentId: null },
-    data: {
-      ...(existingOrder.status === "CONFIRMED" && { status: "PAID" }),
-      stripePaymentId: session.payment_intent as string,
-      paidAt: new Date(),
-    },
-  });
-
-  if (updated.count === 0) {
-    console.log(`[stripe-webhook] Order ${orderId} stripePaymentId already set — skipping (idempotent)`);
-    return;
-  }
-
-  if (existingOrder.status === "CONFIRMED") {
-    await logOrderStatusChange({
-      orderId,
-      fromStatus: "CONFIRMED",
-      toStatus: "PAID",
-      changedByType: "SYSTEM",
-      reason: "Payment completed via Stripe",
-      metadata: {
-        stripeEventId: eventId,
-        stripeSessionId: session.id,
-        stripePaymentIntentId: session.payment_intent,
-      },
-    });
+  if (result.advanced) {
+    console.log(`[stripe-webhook] Order ${orderId} advanced CONFIRMED → PAID`);
   }
 
   // Update seller's monthly volume and notify
@@ -125,7 +189,7 @@ async function handleCheckoutCompleted(
     after(async () => {
       await notifyUser(order.seller.user.clerkId, {
         title: "Payment Received",
-        body: `Order #${orderId.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
+        body: `Order #${orderId!.slice(-6)} has been paid ($${order.totalPrice.toFixed(2)})`,
         deepLink: `/dashboard/orders`,
       });
     });
@@ -139,94 +203,122 @@ async function handlePaymentIntentSucceeded(
   const piOrderId = paymentIntent.metadata?.orderId;
   console.log(`[stripe-webhook] payment_intent.succeeded - orderId: ${piOrderId}, pi: ${paymentIntent.id}`);
 
-  if (!piOrderId) return;
-
   // Fallback: update order if checkout.session.completed didn't fire or was missed
-  const existingOrder = await db.order.findUnique({
-    where: { id: piOrderId },
-    select: { status: true, stripePaymentId: true },
-  });
-
-  if (!existingOrder) return;
-
-  const validStatuses = ["CONFIRMED", "PAID", "COMPLETED"];
-  if (!validStatuses.includes(existingOrder.status)) return;
-
-  // Atomically set stripePaymentId only if not already set
-  const updated = await db.order.updateMany({
-    where: { id: piOrderId, stripePaymentId: null },
-    data: {
-      ...(existingOrder.status === "CONFIRMED" && { status: "PAID" }),
-      stripePaymentId: paymentIntent.id,
-      paidAt: new Date(),
-    },
-  });
-
-  if (updated.count === 0) {
-    console.log(`[stripe-webhook] Order ${piOrderId} stripePaymentId already set — skipping (idempotent)`);
-    return;
-  }
-
-  if (existingOrder.status === "CONFIRMED") {
-    await logOrderStatusChange({
-      orderId: piOrderId,
-      fromStatus: "CONFIRMED",
-      toStatus: "PAID",
-      changedByType: "SYSTEM",
-      reason: "Payment completed via Stripe (payment_intent.succeeded fallback)",
-      metadata: {
-        stripeEventId: eventId,
-        stripePaymentIntentId: paymentIntent.id,
-      },
-    });
-  }
-
-  console.log(`[stripe-webhook] Order ${piOrderId} updated via payment_intent fallback`);
+  await recordSuccessfulPayment(
+    piOrderId!,
+    paymentIntent.id,
+    eventId,
+    "payment_intent.succeeded"
+  );
 }
 
 async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
   const paymentIntentId = charge.payment_intent as string;
   if (!paymentIntentId) return;
 
-  // Find the order that hasn't been cancelled yet (idempotency guard)
+  // Stripe reports the cumulative refunded amount for the charge — use it as
+  // the single source of truth so replayed, out-of-order, and multi-refund
+  // events all reconcile idempotently.
+  const cumulativeRefundedCents = charge.amount_refunded;
+  if (typeof cumulativeRefundedCents !== "number") {
+    console.log(`[stripe-webhook] charge.refunded ${charge.id} without amount_refunded — skipping`);
+    return;
+  }
+
   const order = await db.order.findFirst({
-    where: {
-      stripePaymentId: paymentIntentId,
-      status: { not: "CANCELLED" },
+    where: { stripePaymentId: paymentIntentId },
+    select: {
+      id: true,
+      status: true,
+      refundedCents: true,
+      totalPrice: true,
+      listingId: true,
+      quantity: true,
     },
   });
 
-  if (order) {
-    await db.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancelReason: "Refunded",
-        },
-      });
-      await tx.eggListing.update({
-        where: { id: order.listingId },
-        data: {
-          stockCount: { increment: order.quantity },
-        },
-      });
+  if (!order) {
+    console.log(`[stripe-webhook] No order with payment ${paymentIntentId} — skipping`);
+    return;
+  }
 
-      await logOrderStatusChange({
-        orderId: order.id,
-        fromStatus: order.status,
-        toStatus: "CANCELLED",
-        changedByType: "SYSTEM",
-        reason: "Refunded via Stripe",
-        metadata: {
-          stripeEventId: eventId,
-          stripeChargeId: charge.id,
-          stripePaymentIntentId: paymentIntentId,
+  const orderAmountCents = Math.round(order.totalPrice * 100);
+
+  let transition: RefundReconciliation | null;
+  try {
+    transition = applyCumulativeRefund(
+      {
+        status: order.status,
+        amountCents: orderAmountCents,
+        refundedCents: order.refundedCents,
+      },
+      Math.min(cumulativeRefundedCents, orderAmountCents)
+    );
+  } catch (error) {
+    console.error(`[stripe-webhook] Refund reconciliation for order ${order.id} failed:`, error);
+    return;
+  }
+
+  if (!transition) {
+    console.log(`[stripe-webhook] Refund for order ${order.id} already reconciled — skipping (idempotent)`);
+    return;
+  }
+  const reconciled = transition;
+
+  try {
+    const outcome = await db.$transaction(async (tx) =>
+      applyRefundReconciliation(
+        {
+          id: order.id,
+          status: order.status,
+          refundedCents: order.refundedCents,
+          listingId: order.listingId,
+          quantity: order.quantity,
         },
-        tx,
-      });
-    });
+        reconciled,
+        {
+          // Apply the shared guarded spec verbatim: a concurrent mutation
+          // (admin refund endpoint, seller action) makes this a no-op and
+          // the next event or manual reconciliation covers it.
+          updateOrderGuarded: async (spec) => {
+            const rows = await tx.order.updateMany(spec);
+            return rows.count;
+          },
+          restoreStock: async (listingId, quantity) => {
+            await tx.eggListing.update({
+              where: { id: listingId },
+              data: { stockCount: { increment: quantity } },
+            });
+          },
+          logAudit: async (entry) => {
+            await logOrderStatusChange({
+              orderId: order.id,
+              fromStatus: entry.fromStatus,
+              toStatus: entry.toStatus,
+              changedByType: "SYSTEM",
+              reason: "Refunded via Stripe",
+              metadata: {
+                stripeEventId: eventId,
+                stripeChargeId: charge.id,
+                stripePaymentIntentId: paymentIntentId,
+                refundedCents: entry.refundedCents,
+                cumulativeRefunded: cumulativeRefundedCents,
+              },
+              tx,
+            });
+          },
+        }
+      )
+    );
+
+    if (!outcome.applied) {
+      console.log(
+        `[stripe-webhook] Order ${order.id} changed concurrently during refund reconciliation — skipped`
+      );
+    }
+  } catch (error) {
+    console.error(`[stripe-webhook] Failed to apply refund to order ${order.id}:`, error);
+    throw error; // non-2xx response lets Stripe retry this event
   }
 }
 

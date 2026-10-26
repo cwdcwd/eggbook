@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { createCheckoutSession } from "@/lib/stripe";
+import { createCheckoutSession, expireCheckoutSession, stripe } from "@/lib/stripe";
 import { getOrCreateUser } from "@/lib/auth";
 import { CheckoutSchema } from "@/lib/schemas";
+import { dollarsToCents } from "@/lib/payment-integrity";
+import { createCheckoutForOrder, type CheckoutFlowResult, type CheckoutSessionPorts } from "@/lib/checkout-session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,15 +46,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
-    // Check order status (must be CONFIRMED)
-    if (order.status !== "CONFIRMED") {
+    // Exact integer-cent amounts (rejects fractional-cent totals outright)
+    let amountInCents: number;
+    let platformFeeInCents: number;
+    try {
+      amountInCents = dollarsToCents(order.totalPrice);
+      platformFeeInCents = dollarsToCents(order.platformFee);
+    } catch {
       return NextResponse.json(
-        { error: "Order must be confirmed by seller before payment" },
+        { error: "Order total must be a whole-cent amount" },
         { status: 400 }
       );
     }
 
-    // Create Stripe checkout session
+    // Use seller's Stripe account if Connect is enabled and they're onboarded
+    // Falls back to direct payment in createCheckoutSession if seller lacks capabilities
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!baseUrl) {
       return NextResponse.json(
@@ -60,26 +68,70 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-    const amountInCents = Math.round(order.totalPrice * 100);
-    const platformFeeInCents = Math.round(order.platformFee * 100);
-
-    // Use seller's Stripe account if Connect is enabled and they're onboarded
-    // Falls back to direct payment in createCheckoutSession if seller lacks capabilities
     const connectEnabled = process.env.STRIPE_CONNECT_ENABLED !== 'false'
-    const sellerAccount = connectEnabled && order.seller.stripeOnboarded 
-      ? order.seller.stripeAccountId 
+    const sellerAccount = connectEnabled && order.seller.stripeOnboarded
+      ? order.seller.stripeAccountId
       : null;
 
-    const session = await createCheckoutSession(
-      order.id,
-      amountInCents,
-      sellerAccount,
-      platformFeeInCents,
-      `${baseUrl}/checkout/${order.id}/success?session_id={CHECKOUT_SESSION_ID}`,
-      `${baseUrl}/checkout/${order.id}`
+    // The full decision flow (idempotency, session claim, race handling) lives
+    // in the checkout-session flow module; these ports bind it to the real
+    // Prisma + Stripe surfaces. The claim spec is built by the shared integrity
+    // module and applied verbatim, so the order-status guard on the session
+    // claim matches the one the regression suite exercises.
+    const ports: CheckoutSessionPorts = {
+      findOrder: async (id) =>
+        db.order.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            status: true,
+            stripePaymentId: true,
+            checkoutSessionId: true,
+          },
+        }),
+      retrieveSession: async (sessionId) => {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(sessionId);
+          return { id: session.id, url: session.url, status: session.status ?? null };
+        } catch (error) {
+          console.warn(`Retrieving checkout session ${sessionId} failed`, error);
+          return null;
+        }
+      },
+      createSession: async (input) =>
+        createCheckoutSession(
+          input.orderId,
+          input.amountCents,
+          input.sellerAccount,
+          input.platformFeeCents,
+          `${input.baseUrl}/checkout/${input.orderId}/success?session_id={CHECKOUT_SESSION_ID}`,
+          `${input.baseUrl}/checkout/${input.orderId}`
+        ),
+      claimSession: async (spec) => {
+        const claim = await db.order.updateMany(spec);
+        return claim.count;
+      },
+      expireSession: async (sessionId) => {
+        await expireCheckoutSession(sessionId);
+      },
+    };
+
+    const result = await createCheckoutForOrder(
+      {
+        orderId: order.id,
+        amountCents: amountInCents,
+        platformFeeCents: platformFeeInCents,
+        sellerAccount,
+        baseUrl,
+      },
+      ports
     );
 
-    return NextResponse.json({ url: session.url });
+    const json = (res: CheckoutFlowResult) =>
+      res.kind === "url"
+        ? NextResponse.json({ url: res.url })
+        : NextResponse.json({ error: res.error }, { status: res.status });
+    return json(result);
   } catch (error) {
     console.error("Error creating checkout session:", error);
     return NextResponse.json(

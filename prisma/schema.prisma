@@ -146,6 +146,8 @@ model Order {
   deliveryLat     Float?
   deliveryLng     Float?
   stripePaymentId String?
+  checkoutSessionId String? @unique
+  refundedCents   Int       @default(0)
   paidAt          DateTime?
   completedAt     DateTime?
   cancelledAt     DateTime?
