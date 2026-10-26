@@ -132,6 +132,22 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       isAvailable,
     } = parsed.data;
 
+    // Seller-activity gate: an inactive seller (admin suspension, role
+    // change, or user deactivation) may not re-list anything — including
+    // UNMARKED rows (a listing the seller paused before suspension, or one
+    // whose subscription flag was cleared by something else). Non-relist
+    // edits stay allowed so sellers can prepare their listings (same
+    // transition policy as the visibility rules).
+    if (isAvailable === true && user.sellerProfile!.isActive === false) {
+      return NextResponse.json(
+        {
+          error: "Your seller account is suspended, so listings cannot be re-listed. It can be re-listed once the account is restored.",
+          code: "SELLER_SUSPENDED",
+        },
+        { status: 409 }
+      );
+    }
+
     // Lifecycle rule (pure core): a subscription-hidden or suspension-hidden
     // listing may not be flipped back to public visibility; the activation
     // webhook (subscription) or the admin unsuspend / role-restore action
@@ -172,9 +188,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       existingListing.isAvailable
     );
     const [updated] = await db.$transaction(async (tx) => {
-      // A relist write carries the policy where-guard so a listing hidden by a
-      // concurrent webhook expiry or suspension cannot be re-listed between
-      // the pre-check and this write (result.count 0 → flag disambiguation
+      // A relist write carries the policy where-guard so a listing hidden by
+      // a concurrent webhook expiry or suspension cannot be re-listed between
+      // the pre-check and this write — and the guard's seller-activity
+      // condition makes the write refuse an inactive seller atomically even
+      // for an unmarked row (result.count 0 → flag/activity disambiguation
       // below).
       const result = await tx.eggListing.updateMany({
         where: {
@@ -186,10 +204,17 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       });
 
       if (result.count === 0) {
-        // Distinguish not-found vs not-authorized vs a lost relist race.
+        // Distinguish not-found vs not-authorized vs the owning actor of a
+        // lost relist race (concurrent webhook expiry, suspension, or the
+        // seller's account going inactive between our pre-check and write).
         const exists = await tx.eggListing.findUnique({
           where: { id },
-          select: { id: true, hiddenBySubscription: true, hiddenBySuspension: true },
+          select: {
+            id: true,
+            hiddenBySubscription: true,
+            hiddenBySuspension: true,
+            seller: { select: { isActive: true } },
+          },
         });
         if (exists && isAvailable === true) {
           if (exists.hiddenBySubscription) {
@@ -199,6 +224,12 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
           if (exists.hiddenBySuspension) {
             // Admin suspended the seller between our pre-check and the write
             throw new Error("HIDDEN_BY_SUSPENSION");
+          }
+          if (exists.seller && exists.seller.isActive === false) {
+            // The seller went inactive between the pre-check and the write:
+            // the guard's seller-activity condition consumed the update.
+            // Coded refusal, not generic not-authorized.
+            throw new Error("SELLER_SUSPENDED");
           }
         }
         throw new Error(exists ? "NOT_AUTHORIZED" : "NOT_FOUND");
@@ -260,6 +291,15 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     }
     if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
       return NextResponse.json({ error: "Not authorized to edit this listing" }, { status: 403 });
+    }
+    if (error instanceof Error && error.message === "SELLER_SUSPENDED") {
+      return NextResponse.json(
+        {
+          error: "Your seller account is suspended, so listings cannot be re-listed. It can be re-listed once the account is restored.",
+          code: "SELLER_SUSPENDED",
+        },
+        { status: 409 }
+      );
     }
     if (error instanceof Error && error.message === "NOT_FOUND") {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });

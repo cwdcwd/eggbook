@@ -1,5 +1,6 @@
 import { db } from './db'
 import { SubscriptionStatus } from '@prisma/client'
+import { subscriptionActivationRestoreSpec } from './listing-policy'
 
 /**
  * Handle subscription expiry - hide all seller's listings
@@ -77,18 +78,17 @@ export async function handleSubscriptionActivation(
     },
   })
 
-  // If user has a seller profile, restore listings hidden by subscription expiry
+  // If user has a seller profile, restore listings hidden by subscription
+  // expiry — ONLY while the seller's account is active: the restore spec's
+  // to-one relation filter on the seller evaluates atomically with the
+  // write, so an activation arriving while the seller is suspended (expiry
+  // hid the row, the suspension skipped that non-public row, then the seller
+  // re-subscribed) leaves every row untouched instead of making a suspended
+  // seller's inventory public again.
   if (user.sellerProfile) {
-    const result = await db.eggListing.updateMany({
-      where: {
-        sellerId: user.sellerProfile.id,
-        hiddenBySubscription: true, // Only restore subscription-hidden listings
-      },
-      data: {
-        isAvailable: true,
-        hiddenBySubscription: false,
-      },
-    })
+    const result = await db.eggListing.updateMany(
+      subscriptionActivationRestoreSpec(user.sellerProfile.id)
+    )
 
     console.log(
       `[Subscription] Restored ${result.count} listings for user ${clerkUserId} after subscription activation`

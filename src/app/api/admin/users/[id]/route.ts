@@ -59,7 +59,13 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         // webhook hid and rows the seller deliberately paused are untouched,
         // so unsuspend restores exactly what the suspension hid.
         if (targetUser.sellerProfile) {
+          // Acquires the SAME per-seller advisory lock the listing-create
+          // transaction holds (keyed on the user row) BEFORE flipping, so a
+          // concurrent create that already passed its in-transaction
+          // eligibility re-check cannot insert a still-public listing after
+          // this suspension lands.
           await db.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`seller-entitlement:${targetUser.id}`}), 0)`;
             await tx.sellerProfile.update({
               where: { id: targetUser.sellerProfile!.id },
               data: { isActive: false },
@@ -78,7 +84,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         // subscription-hidden listing stays hidden (the activation webhook
         // owns that flag) and a seller-paused listing stays paused.
         if (targetUser.sellerProfile) {
+          // Same per-seller advisory lock as suspend/create: keeps the
+          // entitlement flip serialized against concurrent listing creates
+          // and other entitlement flips for this seller.
           await db.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`seller-entitlement:${targetUser.id}`}), 0)`;
             await tx.sellerProfile.update({
               where: { id: targetUser.sellerProfile!.id },
               data: { isActive: true },
@@ -98,10 +108,15 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         // Role changes away from SELLER carry the same entitlement policy as
         // suspension (hide with the marker); restoring the SELLER role is a
         // restore event (reactivate the profile, re-list exactly the marked
-        // rows). No seller profile → only the role itself changes.
+        // rows). No seller profile → only the role itself changes. The
+        // per-seller advisory lock (same key as the listing-create
+        // transaction) serializes this entitlement flip against concurrent
+        // creates, so a create that started before the role change cannot
+        // insert a still-public listing after it lands.
         const leavingSeller = role !== "SELLER" && !!targetUser.sellerProfile;
         const becomingSeller = role === "SELLER" && !!targetUser.sellerProfile;
         await db.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`seller-entitlement:${targetUser.id}`}), 0)`;
           await tx.user.update({
             where: { id },
             data: { role },

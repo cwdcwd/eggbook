@@ -21,11 +21,26 @@
  * - A seller may not re-list (isAvailable: true) a listing they don't own,
  *   nor flip a subscription-hidden or suspension-hidden listing back to
  *   public visibility — editing the rest of a hidden listing stays allowed
- *   so sellers and suspended sellers can prepare it.
+ *   so sellers and suspended sellers can prepare it. The relist WRITE itself
+ *   additionally carries a seller-activity condition (see
+ *   sellerRelistWhereGuard): a write can never land while the seller's
+ *   account is inactive, regardless of the row's flags.
  * - A seller cannot exceed their listing cap even when two create requests
  *   race: the count must be re-checked inside the same per-seller serialized
  *   transaction that inserts (see decideListingCapCreate and the listings
- *   POST route's advisory-locked transaction).
+ *   POST route's advisory-locked transaction). Creating a listing is ALSO an
+ *   entitlement-gated write: the seller's activity/role is re-read inside
+ *   that same serialized transaction (decideSellerCreateEligibility), so a
+ *   suspension cannot slide past an earlier read, and the create path never
+ *   re-uplifts a role an admin changed away from SELLER.
+ * - A subscription-activation event re-lists ONLY rows of an ACTIVE seller
+ *   (see subscriptionActivationRestoreSpec): an activation arriving while
+ *   the seller is suspended leaves every row untouched, so no re-subscribe
+ *   can make a suspended seller's inventory public. The write's seller
+ *   activity condition is a to-one relation filter, atomic with the write:
+ *   if suspension commits first the restore's where misses, and if the
+ *   restore lands first the suspension's hide spec re-marks the (then
+ *   publicly visible) row — the two stay race-tight with no extra locks.
  * - A listing with ANY order history (active or fulfilled/cancelled) cannot
  *   be deleted: active orders keep money/fulfillment traceable, historical
  *   orders keep the order trail's referential integrity explicit instead of
@@ -179,12 +194,24 @@ export function decideSellerRelist(
  * concurrent webhook expiry or admin suspension cannot be re-listed between
  * the pre-check and the write (count 0 → route disambiguates by re-reading
  * the flags and surfaces the owning actor's error).
+ *
+ * The guard also carries the seller-activity condition (the to-one relation
+ * filter on the listing's seller) so the write ITSELF can never land while
+ * the seller's account is inactive — an unmarked row (seller-paused, or one
+ * whose webhook flag something else cleared) of a suspended seller is not
+ * re-listable either. The route maps a count-0 with a flagless row and an
+ * inactive seller to a coded suspension refusal.
  */
 export function sellerRelistWhereGuard(): {
   hiddenBySubscription: false;
   hiddenBySuspension: false;
+  seller: { isActive: true };
 } {
-  return { hiddenBySubscription: false, hiddenBySuspension: false };
+  return {
+    hiddenBySubscription: false,
+    hiddenBySuspension: false,
+    seller: { isActive: true },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +255,89 @@ export function sellerSuspensionRestoreSpec(sellerId: string): {
       hiddenBySuspension: true,
     },
     data: { isAvailable: true, hiddenBySuspension: false },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Seller entitlement rule: creating a listing needs an active SELLER account
+// ---------------------------------------------------------------------------
+
+export type UserRoleValue = "BUYER" | "SELLER" | "ADMIN";
+
+export type SellerCreateEligibilityDecision =
+  | { allowed: true }
+  | {
+      allowed: false;
+      code: "SELLER_SUSPENDED" | "NOT_A_SELLER";
+      message: string;
+    };
+
+/**
+ * Decide whether the caller may create a listing AT ALL — the entitlement
+ * gate that stands beside Clerk's plan-feature check and the listing cap.
+ * Two refusals, in order:
+ *
+ * 1. An INACTIVE seller profile (admin suspension, role change away from
+ *    SELLER, or user deactivation) refuses with SELLER_SUSPENDED — with or
+ *    without an active plan, a suspended seller cannot create listings, and
+ *    a brand-new listing would otherwise be public the moment it inserts.
+ * 2. A user whose role is not SELLER refuses with NOT_A_SELLER. This route
+ *    must never re-uplift a role an admin explicitly changed away from
+ *    SELLER (and never uplift ADMIN): the SELLER settings flow is the
+ *    legitimate onboarding path.
+ *
+ * The create route evaluates this TWICE: a fast-fail against its pre-logged
+ * read, and the authoritative evaluation inside the per-seller-advisory-lock
+ * transaction against a FRESH user read — the admin suspend / unsuspend /
+ * role-change / deactivate transactions hold the same lock, so a concurrent
+ * suspension cannot slide between the eligibility read and the insert.
+ */
+export function decideSellerCreateEligibility(input: {
+  role: UserRoleValue;
+  hasSellerProfile: boolean;
+  sellerProfileIsActive: boolean | null;
+}): SellerCreateEligibilityDecision {
+  if (input.hasSellerProfile && input.sellerProfileIsActive === false) {
+    return {
+      allowed: false,
+      code: "SELLER_SUSPENDED",
+      message: "Your seller account is suspended. An admin must restore it before you can create listings.",
+    };
+  }
+  if (input.role !== "SELLER") {
+    return {
+      allowed: false,
+      code: "NOT_A_SELLER",
+      message: "Seller access required to create listings",
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Restore spec for the subscription-activation webhook: it re-lists rows
+ * hidden by subscription expiry, but ONLY while the seller's account is
+ * active — the seller-activity condition is part of the WHERE, evaluated
+ * atomically with the write, so an activation event arriving while the
+ * seller is suspended (expiry hides → suspension skips the already-hidden
+ * row → re-subscribe) can never make a suspended seller's rows public
+ * again. Rows carrying the suspension marker are not repaired here either
+ * (the webhook owns only the subscription flag): a row hidden by BOTH
+ * reasons while suspended keeps both flags, and its subscription flag
+ * clears via a later activation once active or via admin enable after
+ * unsuspend — the row stays non-public throughout either way.
+ */
+export function subscriptionActivationRestoreSpec(sellerId: string): {
+  where: { sellerId: string; hiddenBySubscription: true; seller: { isActive: true } };
+  data: { isAvailable: true; hiddenBySubscription: false };
+} {
+  return {
+    where: {
+      sellerId,
+      hiddenBySubscription: true,
+      seller: { isActive: true },
+    },
+    data: { isAvailable: true, hiddenBySubscription: false },
   };
 }
 

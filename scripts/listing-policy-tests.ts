@@ -19,12 +19,14 @@ import {
   decideListingCapCreate,
   decideListingDeletion,
   decideOrderPlacement,
+  decideSellerCreateEligibility,
   decideSellerRelist,
   orderStockClaimSpec,
   sellerRelistWhereGuard,
   sellerSuspensionHideSpec,
   sellerSuspensionRestoreSpec,
   sellerUpdateData,
+  subscriptionActivationRestoreSpec,
   type ListingFlags,
 } from "../src/lib/listing-policy";
 
@@ -44,14 +46,31 @@ interface OrderRow {
   status: string;
 }
 
-function whereMatches(row: ListingRow, where: Record<string, unknown>): boolean {
+interface SellerProfileRow {
+  id: string;
+  isActive: boolean;
+}
+
+function whereMatches(
+  row: ListingRow,
+  where: Record<string, unknown>,
+  sellerProfiles?: Map<string, SellerProfileRow>
+): boolean {
   for (const [field, expected] of Object.entries(where)) {
     // Prisma field-filter shape (e.g. { gte: n }) vs. literal value
     if (expected !== null && typeof expected === "object" && !Array.isArray(expected)) {
-      const filter = expected as Record<string, number>;
-      if (typeof row[field as keyof ListingRow] !== "number") return false;
-      const value = row[field as keyof ListingRow] as number;
-      if ("gte" in filter && value < filter.gte) return false;
+      const filter = expected as Record<string, unknown>;
+      // Prisma to-one relation filter (e.g. { seller: { isActive: true } }):
+      // evaluated against the relation row's LIVE state at write time; a
+      // relation row that doesn't exist matches nothing.
+      if (field === "seller" && typeof filter.isActive === "boolean") {
+        const profile = sellerProfiles?.get(row.sellerId);
+        if (!profile || profile.isActive !== filter.isActive) return false;
+        continue;
+      }
+      const value = row[field as keyof ListingRow];
+      if (typeof value !== "number") return false;
+      if ("gte" in filter && value < (filter.gte as number)) return false;
       continue;
     }
     if (row[field as keyof ListingRow] !== expected) return false;
@@ -62,6 +81,18 @@ function whereMatches(row: ListingRow, where: Record<string, unknown>): boolean 
 class FakeListingStore {
   listings = new Map<string, ListingRow>();
   orders = new Map<string, OrderRow>();
+  /** Seller profile (entitlement) state: the listing's seller relation. */
+  sellerProfiles = new Map<string, SellerProfileRow>();
+
+  /**
+   * Seed a seller profile BEFORE its listings (seedListing only auto-seeds a
+   * default ACTIVE profile when none exists yet, so this one sticks).
+   */
+  seedSellerProfile(id: string, isActive = true): SellerProfileRow {
+    const profile = { id, isActive };
+    this.sellerProfiles.set(id, profile);
+    return profile;
+  }
 
   seedListing(over: Partial<ListingRow> = {}): ListingRow {
     const row: ListingRow = {
@@ -73,6 +104,11 @@ class FakeListingStore {
       hiddenBySuspension: false,
       ...over,
     };
+    // Default to an ACTIVE profile so a test only has to seed a profile to
+    // model an inactive (suspended / de-roled / deactivated) seller.
+    if (!this.sellerProfiles.has(row.sellerId)) {
+      this.seedSellerProfile(row.sellerId, true);
+    }
     this.listings.set(row.id, row);
     return row;
   }
@@ -114,7 +150,7 @@ class FakeListingStore {
   applySpec(spec: { where: Record<string, unknown>; data: Record<string, unknown> }): number {
     let count = 0;
     for (const row of this.listings.values()) {
-      if (!whereMatches(row, spec.where)) continue;
+      if (!whereMatches(row, spec.where, this.sellerProfiles)) continue;
       const writable = row as unknown as Record<string, unknown>;
       for (const [field, value] of Object.entries(spec.data)) {
         if (value !== null && typeof value === "object") {
@@ -136,15 +172,31 @@ class FakeListingStore {
 
 // Route-shaped relist used by every relist test below (mirrors the PUT where/
 // data exactly, so the guard fragments stay honest). `interleave` runs between
-// the route's pre-check and its guard-write, like a concurrent webhook firing.
+// the route's pre-check and its guard-write, like a concurrent webhook (or a
+// suspension) firing. `sellerActive` mirrors what the seller row reads at the
+// pre-check; the WRITE-side condition always comes from the store's live
+// profile state, so an interleave that flips it is what the where-guard sees.
 function sellerRelist(
   store: FakeListingStore,
   listingId: string,
   sellerId: string,
-  interleave?: () => void
+  interleave?: () => void,
+  opts: { sellerActive?: boolean } = {}
 ) {
   const current = store.listings.get(listingId);
   assert.ok(current, "relist target must exist in test store");
+  const sellerActive = opts.sellerActive ?? store.sellerProfiles.get(sellerId)?.isActive ?? true;
+
+  // 1. Seller-activity gate (route pre-check).
+  if (sellerActive === false) {
+    return {
+      allowed: false,
+      code: "SELLER_SUSPENDED",
+      message: "Your seller account is suspended, so listings cannot be re-listed. It can be re-listed once the account is restored.",
+    };
+  }
+
+  // 2. Row-level lifecycle decision (pre-check).
   const precheck = decideSellerRelist(
     {
       isAvailable: current.isAvailable,
@@ -155,6 +207,7 @@ function sellerRelist(
   );
   if (!precheck.allowed) return precheck;
 
+  // 3. Interleave, then the guard-write.
   interleave?.();
 
   const spec = {
@@ -163,9 +216,12 @@ function sellerRelist(
   };
   const applied = store.applySpec(spec);
   if (applied === 0) {
+    // Count-0 disambiguation (the route re-reads flags + seller activity):
     const after = store.listings.get(listingId);
     if (after?.hiddenBySubscription) throw new Error("HIDDEN_BY_SUBSCRIPTION");
     if (after?.hiddenBySuspension) throw new Error("HIDDEN_BY_SUSPENSION");
+    const profile = store.sellerProfiles.get(sellerId);
+    if (profile && !profile.isActive) throw new Error("SELLER_SUSPENDED");
     throw new Error("NOT_AUTHORIZED");
   }
   return precheck;
@@ -426,6 +482,57 @@ test("seller relist: cross-seller relist claims nothing (ownership guard)", () =
 });
 
 // ---------------------------------------------------------------------------
+// Seller relist: seller-activity gate on the write (round-2 blocking item 2)
+// ---------------------------------------------------------------------------
+
+test("relist where-guard carries the seller-activity condition (race-tight)", () => {
+  assert.deepEqual(sellerRelistWhereGuard(), {
+    hiddenBySubscription: false,
+    hiddenBySuspension: false,
+    seller: { isActive: true },
+  });
+});
+
+test("seller relist: an inactive seller cannot re-list an unmarked row (pre-check)", () => {
+  // The relist gap: an unmarked (seller-paused) row of a suspended seller
+  // carries no flags, so the row-level lifecycle decision would allow the
+  // flip — the seller-activity pre-check and the write-side condition close
+  // it.
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", false); // suspended BEFORE the row
+  store.seedListing({ id: "l1", isAvailable: false }); // paused, unmarked
+  const result = sellerRelist(store, "l1", "s1", undefined, { sellerActive: false });
+  assert.equal(result.allowed, false);
+  assert.equal(result.allowed === false && result.code, "SELLER_SUSPENDED");
+  assert.equal(store.listings.get("l1")!.isAvailable, false, "row stays paused");
+});
+
+test("seller relist: a suspension between the pre-check and the write is refused with the suspension code", () => {
+  const store = new FakeListingStore();
+  store.seedListing({ id: "l1", isAvailable: false }); // paused, unmarked, active seller
+  assert.throws(
+    () =>
+      sellerRelist(store, "l1", "s1", () => {
+        // Admin suspension lands between pre-check and write. The row is
+        // NOT publicly visible, so the hide spec (which only marks public
+        // rows) doesn't touch it — but the seller is now inactive, and the
+        // write's seller-activity condition must consume the update.
+        store.seedSellerProfile("s1", false);
+      }),
+    /SELLER_SUSPENDED/
+  );
+  assert.equal(store.listings.get("l1")!.isAvailable, false, "not re-listed while suspended");
+});
+
+test("seller relist: an active seller's paused row still re-lists (positive control)", () => {
+  const store = new FakeListingStore();
+  store.seedListing({ id: "l1", isAvailable: false });
+  const result = sellerRelist(store, "l1", "s1");
+  assert.equal(result.allowed, true);
+  assert.equal(store.listings.get("l1")!.isAvailable, true);
+});
+
+// ---------------------------------------------------------------------------
 // Seller suspension / role-change entitlement: hide-exact, restore-exact
 // ---------------------------------------------------------------------------
 
@@ -474,6 +581,92 @@ test("suspension restore-spec restores exactly the marked rows", () => {
 
   const l3 = store.listings.get("l3")!;
   assert.equal(l3.isAvailable, false, "seller-paused row stays paused");
+});
+
+// ---------------------------------------------------------------------------
+// subscriptionActivationRestoreSpec — activation gates on seller activity
+// (round-2 blocking item 3)
+// ---------------------------------------------------------------------------
+
+test("activation: a re-subscribe while suspended leaves subscription-hidden rows hidden, and the following unsuspend cannot repair them", () => {
+  // The review's sequence: expiry hides → suspension skips the already-hidden
+  // row (no marker) → seller re-subscribes while suspended → activation must
+  // NOT re-list the row; with no marker, no unsuspend can repair it either.
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", false); // suspended seller (before listing seed)
+  store.seedListing({ id: "l1", isAvailable: false, hiddenBySubscription: true });
+  assert.equal(store.applySpec(sellerSuspensionHideSpec("s1")), 0, "suspension must not mark an already-hidden row");
+
+  // Activation while suspended: the seller-activity condition in the where
+  // consumes the write — nothing is touched, the webhook flag stays set.
+  assert.equal(store.applySpec(subscriptionActivationRestoreSpec("s1")), 0, "activation must refuse to restore for an inactive seller");
+  const l1 = store.listings.get("l1")!;
+  assert.equal(l1.isAvailable, false, "row must not go public while the seller is suspended");
+  assert.equal(l1.hiddenBySubscription, true, "webhook flag stays set while suspended");
+  assert.equal(l1.hiddenBySuspension, false, "no marker: suspension skipped this row");
+
+  // The unsuspend that follows has no marker to repair — the row stays
+  // non-public until a later activation while active, or admin enable.
+  assert.equal(store.applySpec(sellerSuspensionRestoreSpec("s1")), 0, "unsuspend cannot restore a subscription-hidden row");
+  assert.equal(store.listings.get("l1")!.isAvailable, false, "still non-public after unsuspend");
+});
+
+test("activation: restores a subscription-hidden row only for an active seller (positive control)", () => {
+  const store = new FakeListingStore();
+  store.seedListing({ id: "l1", isAvailable: false, hiddenBySubscription: true });
+
+  const touched = store.applySpec(subscriptionActivationRestoreSpec("s1"));
+  assert.equal(touched, 1);
+
+  const l1 = store.listings.get("l1")!;
+  assert.equal(l1.isAvailable, true);
+  assert.equal(l1.hiddenBySubscription, false);
+  assert.equal(l1.hiddenBySuspension, false);
+});
+
+test("activation: a suspension that lands after the restore re-marks the now-public row (no interleave window)", () => {
+  // Restore-first ordering: the restore makes the row publicly visible, and
+  // the suspension's hide spec — running inside the same locked transaction
+  // as the entitlement flip — re-marks it. Both orderings end non-public,
+  // with no extra locks (the where-condition is atomic with each write).
+  const store = new FakeListingStore();
+  store.seedListing({ id: "l1", isAvailable: false, hiddenBySubscription: true });
+
+  assert.equal(store.applySpec(subscriptionActivationRestoreSpec("s1")), 1); // restore is public now
+  const marked = store.applySpec(sellerSuspensionHideSpec("s1")); // suspension lands
+  assert.equal(marked, 1, "suspension must mark the row the restore exposed");
+  const l1 = store.listings.get("l1")!;
+  assert.equal(l1.isAvailable, false);
+  assert.equal(l1.hiddenBySuspension, true);
+});
+
+test("activation: a row hidden by BOTH subscription and suspension keeps both flags while suspended (untouched by activation)", () => {
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", false); // suspended
+  store.seedListing({ id: "l1", isAvailable: false, hiddenBySubscription: true, hiddenBySuspension: true });
+
+  assert.equal(store.applySpec(subscriptionActivationRestoreSpec("s1")), 0, "activation must not touch rows of an inactive seller");
+  const l1 = store.listings.get("l1")!;
+  assert.equal(l1.isAvailable, false);
+  assert.equal(l1.hiddenBySubscription, true, "webhook flag intact");
+  assert.equal(l1.hiddenBySuspension, true, "suspension marker intact");
+});
+
+test("activation: for an ACTIVE seller, activation clears only the webhook flag — the suspension marker stays and keeps the row non-public", () => {
+  // End-state the review asked to pin: a both-flag row's subscription flag
+  // clears via a later activation while active (or admin enable after
+  // unsuspend), but the suspension marker is owned by suspend/unsuspend, so
+  // the row stays non-public throughout.
+  const store = new FakeListingStore();
+  store.seedListing({ id: "l1", isAvailable: false, hiddenBySubscription: true, hiddenBySuspension: true }); // both flags, active
+
+  const touched = store.applySpec(subscriptionActivationRestoreSpec("s1"));
+  assert.equal(touched, 1);
+  const l1 = store.listings.get("l1")!;
+  assert.equal(l1.hiddenBySubscription, false, "webhook flag cleared");
+  assert.equal(l1.hiddenBySuspension, true, "suspension marker untouched by the webhook");
+  const publicIds = [...store.listings.values()].filter((l) => whereMatches(l, PUBLIC_LISTING_CONDITION, store.sellerProfiles)).map((l) => l.id);
+  assert.deepEqual(publicIds, [], "row must stay non-public while the marker stands");
 });
 
 test("public visibility predicate excludes suspension-hidden rows", () => {
@@ -540,6 +733,136 @@ test("listing cap: an UN-serialized count-then-create (the original bug) would e
   store.seedListing({ id: "l3", sellerId: "s1" });
   store.seedListing({ id: "l4", sellerId: "s1" });
   assert.equal(store.listingsBySeller("s1").length, 4, "cap of 3 was exceeded without serialization");
+});
+
+// ---------------------------------------------------------------------------
+// decideSellerCreateEligibility — the suspension wall on the CREATE path
+// (round-2 blocking item 1)
+// ---------------------------------------------------------------------------
+
+test("create eligibility: an inactive seller profile refuses with SELLER_SUSPENDED (plan state is irrelevant)", () => {
+  // A suspended seller keeps role SELLER — the profile's isActive is the
+  // suspension state — and must be refused even with an active plan.
+  const suspended = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: false,
+  });
+  assert.equal(suspended.allowed, false);
+  assert.equal(suspended.allowed === false && suspended.code, "SELLER_SUSPENDED");
+
+  // The admin-de-roled-and-suspended shape: role changed away AND profile
+  // inactive. The profile state wins the message (suspension is the wall
+  // that must hold).
+  const suspendedAndDeRoled = decideSellerCreateEligibility({
+    role: "BUYER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: false,
+  });
+  assert.equal(suspendedAndDeRoled.allowed, false);
+  assert.equal(suspendedAndDeRoled.allowed === false && suspendedAndDeRoled.code, "SELLER_SUSPENDED");
+});
+
+test("create eligibility: non-SELLER roles refuse with NOT_A_SELLER, so the create route cannot re-uplift them", () => {
+  // The uplift gap: the route's auto-create must not resurrect seller
+  // entitlement for a user an admin explicitly changed away from SELLER —
+  // including never-a-seller users with no profile at all.
+  for (const role of ["BUYER", "ADMIN"] as const) {
+    const noProfile = decideSellerCreateEligibility({
+      role,
+      hasSellerProfile: false,
+      sellerProfileIsActive: null,
+    });
+    assert.equal(noProfile.allowed, false, `${role} without profile must be refused`);
+    assert.equal(noProfile.allowed === false && noProfile.code, "NOT_A_SELLER");
+  }
+  // An ADMIN with an existing (active) profile is still not entitled to
+  // create: admin is not a seller.
+  const adminWithProfile = decideSellerCreateEligibility({
+    role: "ADMIN",
+    hasSellerProfile: true,
+    sellerProfileIsActive: true,
+  });
+  assert.equal(adminWithProfile.allowed, false);
+  assert.equal(adminWithProfile.allowed === false && adminWithProfile.code, "NOT_A_SELLER");
+});
+
+test("create eligibility: an active SELLER may create, with or without a profile (bootstrap)", () => {
+  assert.deepEqual(
+    decideSellerCreateEligibility({ role: "SELLER", hasSellerProfile: true, sellerProfileIsActive: true }),
+    { allowed: true }
+  );
+  // First creation after an admin (re)grants SELLER to a user with no
+  // profile: the profile is bootstrapped inside the locked transaction —
+  // without any role write.
+  assert.deepEqual(
+    decideSellerCreateEligibility({ role: "SELLER", hasSellerProfile: false, sellerProfileIsActive: null }),
+    { allowed: true }
+  );
+});
+
+test("create: a suspension committed between the route reads is caught by the in-transaction re-read (same-lock serialization)", () => {
+  // Models the route's advisory-locked transaction: the create re-reads the
+  // seller's role + profile INSIDE the lock, and the suspend transaction
+  // holds the SAME lock while flipping — so a suspension that commits before
+  // the create's lock window is visible to it, and one that commits after
+  // cannot interleave between the re-read and the insert.
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", true);
+
+  // Route pre-read (outside the transaction): seller looks eligible.
+  const pre = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(pre.allowed, true);
+
+  // Admin suspend holds the same lock and completes: flip + hide spec (0
+  // public rows to hide).
+  store.seedSellerProfile("s1", false);
+  assert.equal(store.applySpec(sellerSuspensionHideSpec("s1")), 0);
+
+  // Inside the locked transaction, the FRESH read sees the new state.
+  const inTx = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(inTx.allowed, false);
+  assert.equal(inTx.allowed === false && inTx.code, "SELLER_SUSPENDED");
+  assert.equal(store.listings.size, 0, "no listing was created for the suspended seller");
+});
+
+test("create: an UN-serialized eligibility read (the original gap) would land a public listing for a suspended seller", () => {
+  // Negative control (mirrors the un-serialized cap test): a naive route
+  // that decides eligibility only from a pre-transaction read and skips the
+  // in-transaction re-check behaves like this — the stale read passes, the
+  // suspension completes (nothing public to hide yet), and the insert lands
+  // AFTER the suspension's hide spec ran, so the new row is publicly visible
+  // with NO suspension marker. This is the state the in-transaction
+  // eligibility re-read + the same advisory lock make impossible.
+  const store = new FakeListingStore();
+  store.seedSellerProfile("s1", true);
+
+  const staleRead = decideSellerCreateEligibility({
+    role: "SELLER",
+    hasSellerProfile: true,
+    sellerProfileIsActive: store.sellerProfiles.get("s1")!.isActive,
+  });
+  assert.equal(staleRead.allowed, true);
+
+  // Suspension completes first (its hide spec has no publicly visible rows).
+  store.seedSellerProfile("s1", false);
+  assert.equal(store.applySpec(sellerSuspensionHideSpec("s1")), 0);
+
+  // Naive insert from the stale decision (skip the re-check): the row lands
+  // public and unmarked while the seller is suspended.
+  store.seedListing({ id: "l-new", sellerId: "s1", isAvailable: true });
+  const publicIds = [...store.listings.values()]
+    .filter((l) => whereMatches(l, PUBLIC_LISTING_CONDITION, store.sellerProfiles))
+    .map((l) => l.id);
+  assert.deepEqual(publicIds, ["l-new"], "the gap: a public, unmarked listing of a suspended seller");
 });
 
 // ---------------------------------------------------------------------------
