@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { verifyAdmin } from "@/lib/auth";
+import { ACTIVE_ORDER_STATUSES, decideListingDeletion } from "@/lib/listing-policy";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -41,9 +42,12 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         return NextResponse.json({ success: true, message: "Listing disabled" });
 
       case "enable":
+        // Admin enable restores public visibility for BOTH hidden reasons:
+        // clearing hiddenBySubscription keeps the expiry webhook's flag from
+        // fighting the admin's decision (expiry will re-set it on next fire).
         await db.eggListing.update({
           where: { id },
-          data: { isAvailable: true },
+          data: { isAvailable: true, hiddenBySubscription: false },
         });
         return NextResponse.json({ success: true, message: "Listing enabled" });
 
@@ -79,17 +83,17 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
-    // Check for active orders
+    // Check for active orders (shared lifecycle rule)
     const activeOrders = await db.order.count({
       where: {
         listingId: id,
-        status: { in: ["PENDING", "CONFIRMED", "PAID"] },
+        status: { in: [...ACTIVE_ORDER_STATUSES] },
       },
     });
 
-    if (activeOrders > 0) {
+    if (!decideListingDeletion(activeOrders).allowed) {
       return NextResponse.json(
-        { error: "Cannot delete listing with active orders. Disable it instead." },
+        { error: "Cannot delete listing with active orders. Disable it instead.", code: "LISTING_HAS_ACTIVE_ORDERS" },
         { status: 400 }
       );
     }

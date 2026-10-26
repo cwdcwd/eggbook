@@ -10,6 +10,7 @@ import { logOrderStatusChange } from "@/lib/order-audit";
 import { CreateOrderSchema, OrderStatusParam } from "@/lib/schemas";
 import { rateLimit } from "@/lib/rate-limit";
 import { dollarsToCents } from "@/lib/payment-integrity";
+import { decideOrderPlacement, orderStockClaimSpec } from "@/lib/listing-policy";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -39,8 +40,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
-    if (!listing.isAvailable || listing.stockCount < quantity) {
-      return NextResponse.json({ error: "Not enough stock" }, { status: 400 });
+    // Visibility + stock rule (pure core): subscription-hidden listings must
+    // not be sellable — ordering one would leak a listing the expiry webhook hid.
+    const placement = decideOrderPlacement(
+      {
+        isAvailable: listing.isAvailable,
+        hiddenBySubscription: listing.hiddenBySubscription,
+        stockCount: listing.stockCount,
+      },
+      quantity
+    );
+    if (!placement.allowed) {
+      return NextResponse.json(
+        { error: placement.message, code: placement.code },
+        { status: 400 }
+      );
     }
 
     // Get buyer
@@ -82,17 +96,12 @@ export async function POST(req: NextRequest) {
 
     // Create order and decrement stock in a transaction (with atomic check)
     const order = await db.$transaction(async (tx) => {
-      // Atomically decrement stock only if sufficient quantity exists
-      const updateResult = await tx.eggListing.updateMany({
-        where: {
-          id: listingId,
-          stockCount: { gte: quantity },
-          isAvailable: true,
-        },
-        data: {
-          stockCount: { decrement: quantity },
-        },
-      });
+      // Atomically decrement stock only if sufficient quantity exists on a
+      // still-public listing (shared spec applied verbatim — the
+      // hiddenBySubscription guard closes the webhook-race window).
+      const updateResult = await tx.eggListing.updateMany(
+        orderStockClaimSpec(listingId, quantity)
+      );
 
       // Verify stock was actually decremented (handles race condition)
       if (updateResult.count === 0) {

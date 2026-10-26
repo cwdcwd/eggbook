@@ -47,6 +47,7 @@ export default function EditListingPage({
   const [customTag, setCustomTag] = useState("");
   const [pricingUnit, setPricingUnit] = useState("DOZEN");
   const [isAvailable, setIsAvailable] = useState(true);
+  const [hiddenBySubscription, setHiddenBySubscription] = useState(false);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -95,6 +96,7 @@ export default function EditListingPage({
         setSelectedTags(listing.tags?.map((t: { name: string }) => t.name) || []);
         setPricingUnit(listing.unit || "DOZEN");
         setIsAvailable(listing.isAvailable ?? true);
+        setHiddenBySubscription(listing.hiddenBySubscription ?? false);
       } catch (error) {
         console.error("Failed to load listing:", error);
         alert("Failed to load listing");
@@ -227,17 +229,32 @@ export default function EditListingPage({
             <CardTitle>Availability</CardTitle>
           </CardHeader>
           <CardContent>
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isAvailable}
-                onChange={(e) => setIsAvailable(e.target.checked)}
-                className="w-5 h-5 rounded border-amber-300 text-amber-500 focus:ring-amber-500"
-              />
-              <span className="text-amber-900">
-                Listing is available for purchase
-              </span>
-            </label>
+            {hiddenBySubscription ? (
+              <div className="space-y-2">
+                <Badge variant="warning">Hidden by subscription</Badge>
+                <p className="text-sm text-amber-700">
+                  This listing is hidden from buyers because the seller subscription expired.
+                  Reactivate your subscription to list it again — its details can still be edited here.
+                </p>
+                <Link href="/pricing" className="inline-block">
+                  <Button variant="outline" size="sm">
+                    View Plans
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isAvailable}
+                  onChange={(e) => setIsAvailable(e.target.checked)}
+                  className="w-5 h-5 rounded border-amber-300 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-amber-900">
+                  Listing is available for purchase
+                </span>
+              </label>
+            )}
           </CardContent>
         </Card>
 

@@ -14,7 +14,7 @@
     "db:cleanup": "tsx scripts/cleanup.ts",
     "db:cleanup:dry": "tsx scripts/cleanup.ts --dry-run",
     "db:reset": "tsx scripts/cleanup.ts --force && tsx scripts/seed.ts",
-    "test": "node --import tsx --test scripts/payment-integrity-tests.ts scripts/order-integrity-tests.ts",
+    "test": "node --import tsx --test scripts/payment-integrity-tests.ts scripts/order-integrity-tests.ts scripts/listing-policy-tests.ts",
     "test:security": "tsx scripts/security-tests.ts"
   },
   "dependencies": {

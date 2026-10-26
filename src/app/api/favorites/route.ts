@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { getOrCreateUser } from "@/lib/auth";
 import { AddFavoriteSchema } from "@/lib/schemas";
+import { PUBLIC_LISTING_CONDITION } from "@/lib/listing-policy";
 
 // Add a seller to favorites
 export async function POST(req: NextRequest) {
@@ -84,7 +85,9 @@ export async function GET(req: NextRequest) {
           },
         },
         listings: {
-          where: { isAvailable: true },
+          // Public visibility rule: subscription-hidden listings must not
+          // surface on saved-seller cards.
+          where: { ...PUBLIC_LISTING_CONDITION },
           take: 3,
         },
       },

@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { verifyAdmin } from "@/lib/auth";
 import { PricingUnit } from "@prisma/client";
 import { UpdateListingSchema } from "@/lib/schemas";
+import {
+  ACTIVE_ORDER_STATUSES,
+  decideListingDeletion,
+  decideSellerRelist,
+  sellerRelistWhereGuard,
+} from "@/lib/listing-policy";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -31,6 +38,27 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     if (!listing) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
+
+    // Visibility gate: subscription-hidden and seller/admin-disabled listings
+    // are not public. The owner and admins keep read access so dashboards and
+    // reconciliation keep working. Fully public listings need no auth work.
+    const isPublic = listing.isAvailable && !listing.hiddenBySubscription;
+    if (!isPublic) {
+      const { userId } = await auth();
+      if (!userId) {
+        return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+      }
+
+      const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { sellerProfile: { select: { id: true } } },
+      });
+      const isOwner = user?.sellerProfile?.id === listing.sellerId;
+      const isAdmin = await verifyAdmin();
+      if (!isOwner && !isAdmin) {
+        return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+      }
     }
 
     return NextResponse.json(listing);
@@ -101,6 +129,22 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       isAvailable,
     } = parsed.data;
 
+    // Lifecycle rule (pure core): a subscription-hidden listing may not be
+    // flipped back to public visibility; the activation webhook owns that flag.
+    const relist = decideSellerRelist(
+      {
+        isAvailable: existingListing.isAvailable,
+        hiddenBySubscription: existingListing.hiddenBySubscription,
+      },
+      isAvailable
+    );
+    if (!relist.allowed) {
+      return NextResponse.json(
+        { error: relist.message, code: relist.code },
+        { status: 403 }
+      );
+    }
+
     // Handle tags - connect existing or create new ones
     const tagConnections = await Promise.all(
       (tags || []).map(async (tagName: string) => {
@@ -117,8 +161,15 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     // Update listing atomically with ownership check (updateMany supports non-unique where)
     const sellerId = user.sellerProfile!.id;
     const [updated] = await db.$transaction(async (tx) => {
+      // A relist write carries the policy where-guard so a listing hidden by a
+      // concurrent webhook expiry cannot be re-listed between the pre-check
+      // and this write (result.count 0 → HIDDEN_BY_SUBSCRIPTION below).
       const result = await tx.eggListing.updateMany({
-        where: { id, sellerId },
+        where: {
+          id,
+          sellerId,
+          ...(isAvailable === true ? sellerRelistWhereGuard() : {}),
+        },
         data: {
           title: title.trim(),
           description: description?.trim() || null,
@@ -133,8 +184,15 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       });
 
       if (result.count === 0) {
-        // Distinguish not-found vs not-authorized
-        const exists = await tx.eggListing.findUnique({ where: { id }, select: { id: true } });
+        // Distinguish not-found vs not-authorized vs re-list-race-lost
+        const exists = await tx.eggListing.findUnique({
+          where: { id },
+          select: { id: true, hiddenBySubscription: true },
+        });
+        if (exists && isAvailable === true && exists.hiddenBySubscription) {
+          // Webhook hid the listing between our pre-check and the write
+          throw new Error("HIDDEN_BY_SUBSCRIPTION");
+        }
         throw new Error(exists ? "NOT_AUTHORIZED" : "NOT_FOUND");
       }
 
@@ -158,6 +216,15 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(updated);
   } catch (error) {
+    if (error instanceof Error && error.message === "HIDDEN_BY_SUBSCRIPTION") {
+      return NextResponse.json(
+        {
+          error: "Listing is hidden by subscription expiry. Reactivate your subscription to relist it.",
+          code: "LISTING_HIDDEN_BY_SUBSCRIPTION",
+        },
+        { status: 403 }
+      );
+    }
     if (error instanceof Error && error.message === "NOT_AUTHORIZED") {
       return NextResponse.json({ error: "Not authorized to edit this listing" }, { status: 403 });
     }
@@ -202,29 +269,48 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Not authorized to delete this listing" }, { status: 403 });
     }
 
-    // Check for active orders
-    const activeOrders = await db.order.count({
-      where: {
-        listingId: id,
-        status: { in: ["PENDING", "CONFIRMED", "PAID"] },
-      },
+    // Delete under the policy core, inside a transaction that locks the listing
+    // row: an order created concurrently blocks (FK) and the deletion
+    // re-checks active orders against the locked state instead of a racy read.
+    const sellerId = user.sellerProfile.id;
+    const outcome = await db.$transaction(async (tx) => {
+      // Serialize order-creation vs. deletion on this listing row. The FK from
+      // Order.listing is Restrict, so this lock makes concurrent orders wait
+      // and fail cleanly instead of racing a free deleteMany.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "EggListing" WHERE "id" = ${id} FOR UPDATE`;
+      if (locked.length === 0) {
+        return { kind: "NOT_FOUND" as const };
+      }
+
+      // Active (PENDING/CONFIRMED/PAID) orders block deletion: money and
+      // fulfillment must stay traceable. Pure decision, shared with admin.
+      const activeOrderCount = await tx.order.count({
+        where: { listingId: id, status: { in: [...ACTIVE_ORDER_STATUSES] } },
+      });
+
+      if (!decideListingDeletion(activeOrderCount).allowed) {
+        return { kind: "ACTIVE_ORDERS" as const };
+      }
+
+      // Atomic ownership-checked delete
+      const result = await tx.eggListing.deleteMany({
+        where: { id, sellerId },
+      });
+
+      return result.count === 0
+        ? ({ kind: "NOT_FOUND" as const }) // deleted between check and delete (race) — treat as not found
+        : ({ kind: "DELETED" as const });
     });
 
-    if (activeOrders > 0) {
+    if (outcome.kind === "NOT_FOUND") {
+      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
+    if (outcome.kind === "ACTIVE_ORDERS") {
       return NextResponse.json(
-        { error: "Cannot delete listing with active orders" },
+        { error: "Cannot delete listing with active orders", code: "LISTING_HAS_ACTIVE_ORDERS" },
         { status: 400 }
       );
-    }
-
-    // Delete listing with atomic ownership check
-    const result = await db.eggListing.deleteMany({
-      where: { id, sellerId: user.sellerProfile.id },
-    });
-
-    if (result.count === 0) {
-      // Listing was deleted between check and deleteMany (race) — treat as not found
-      return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });
