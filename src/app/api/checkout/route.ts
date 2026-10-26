@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { createCheckoutSession, expireCheckoutSession, stripe } from "@/lib/stripe";
 import { getOrCreateUser } from "@/lib/auth";
 import { CheckoutSchema } from "@/lib/schemas";
-import { dollarsToCents, nextCheckoutAction } from "@/lib/payment-integrity";
+import { dollarsToCents } from "@/lib/payment-integrity";
+import { createCheckoutForOrder, type CheckoutFlowResult, type CheckoutSessionPorts } from "@/lib/checkout-session";
 
 export async function POST(req: NextRequest) {
   try {
@@ -58,50 +59,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // If this order already has a stored session, check whether it can still
-    // be paid — that makes checkout creation idempotent: retries and refreshes
-    // return the same open session instead of stacking up duplicates.
-    let sessionStatus: string | null = null;
-    if (order.checkoutSessionId) {
-      try {
-        const existing = await stripe.checkout.sessions.retrieve(order.checkoutSessionId);
-        sessionStatus = existing.status ?? null;
-      } catch (error) {
-        // Unretrievable (deleted/unexpected) — fall through and mint a new one.
-        console.warn(`Retrieving stored checkout session for order ${orderId} failed`, error);
-        sessionStatus = null;
-      }
-    }
-
-    const decision = nextCheckoutAction(
-      { status: order.status, stripePaymentId: order.stripePaymentId },
-      sessionStatus
-    );
-
-    if (decision === "reject-paid") {
-      return NextResponse.json(
-        { error: "Order has already been paid" },
-        { status: 409 }
-      );
-    }
-    if (decision === "reject-status") {
-      return NextResponse.json(
-        { error: "Order must be confirmed by seller before payment" },
-        { status: 400 }
-      );
-    }
-    if (decision === "reject-completed-session") {
-      return NextResponse.json(
-        { error: "A previous checkout session already completed; awaiting payment confirmation" },
-        { status: 409 }
-      );
-    }
-
-    if (decision === "reuse") {
-      const session = await stripe.checkout.sessions.retrieve(order.checkoutSessionId!);
-      return NextResponse.json({ url: session.url });
-    }
-
     // Use seller's Stripe account if Connect is enabled and they're onboarded
     // Falls back to direct payment in createCheckoutSession if seller lacks capabilities
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -116,46 +73,65 @@ export async function POST(req: NextRequest) {
       ? order.seller.stripeAccountId
       : null;
 
-    const session = await createCheckoutSession(
-      order.id,
-      amountInCents,
-      sellerAccount,
-      platformFeeInCents,
-      `${baseUrl}/checkout/${order.id}/success?session_id={CHECKOUT_SESSION_ID}`,
-      `${baseUrl}/checkout/${order.id}`
+    // The full decision flow (idempotency, session claim, race handling) lives
+    // in the checkout-session flow module; these ports bind it to the real
+    // Prisma + Stripe surfaces. The claim spec is built by the shared integrity
+    // module and applied verbatim, so the order-status guard on the session
+    // claim matches the one the regression suite exercises.
+    const ports: CheckoutSessionPorts = {
+      findOrder: async (id) =>
+        db.order.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            status: true,
+            stripePaymentId: true,
+            checkoutSessionId: true,
+          },
+        }),
+      retrieveSession: async (sessionId) => {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(sessionId);
+          return { id: session.id, url: session.url, status: session.status ?? null };
+        } catch (error) {
+          console.warn(`Retrieving checkout session ${sessionId} failed`, error);
+          return null;
+        }
+      },
+      createSession: async (input) =>
+        createCheckoutSession(
+          input.orderId,
+          input.amountCents,
+          input.sellerAccount,
+          input.platformFeeCents,
+          `${input.baseUrl}/checkout/${input.orderId}/success?session_id={CHECKOUT_SESSION_ID}`,
+          `${input.baseUrl}/checkout/${input.orderId}`
+        ),
+      claimSession: async (spec) => {
+        const claim = await db.order.updateMany(spec);
+        return claim.count;
+      },
+      expireSession: async (sessionId) => {
+        await expireCheckoutSession(sessionId);
+      },
+    };
+
+    const result = await createCheckoutForOrder(
+      {
+        orderId: order.id,
+        amountCents: amountInCents,
+        platformFeeCents: platformFeeInCents,
+        sellerAccount,
+        baseUrl,
+      },
+      ports
     );
 
-    // Atomically claim the session slot: two racing creators each mint a
-    // session, but only the request that wins the compare-and-set keeps it.
-    // The loser expires its own session so only one open session remains.
-    const claim = await db.order.updateMany({
-      where: { id: order.id, checkoutSessionId: order.checkoutSessionId ?? null },
-      data: { checkoutSessionId: session.id },
-    });
-
-    if (claim.count === 0) {
-      void expireCheckoutSession(session.id);
-      const winner = await db.order.findUnique({
-        where: { id: order.id },
-        select: { checkoutSessionId: true },
-      });
-      if (winner?.checkoutSessionId) {
-        try {
-          const winSession = await stripe.checkout.sessions.retrieve(winner.checkoutSessionId);
-          if (winSession.status === "open") {
-            return NextResponse.json({ url: winSession.url });
-          }
-        } catch {
-          // fall through to the race error below
-        }
-      }
-      return NextResponse.json(
-        { error: "Checkout session could not be settled; please retry" },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json({ url: session.url });
+    const json = (res: CheckoutFlowResult) =>
+      res.kind === "url"
+        ? NextResponse.json({ url: res.url })
+        : NextResponse.json({ error: res.error }, { status: res.status });
+    return json(result);
   } catch (error) {
     console.error("Error creating checkout session:", error);
     return NextResponse.json(

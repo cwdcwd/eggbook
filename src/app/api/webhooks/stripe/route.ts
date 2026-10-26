@@ -10,6 +10,7 @@ import {
   paymentEventAction,
   type RefundReconciliation,
 } from "@/lib/payment-integrity";
+import { applyRefundReconciliation } from "@/lib/refund-reconciliation";
 
 
 // --- Shared business logic helpers ---
@@ -265,60 +266,52 @@ async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
   const reconciled = transition;
 
   try {
-    const updatedRows = await db.$transaction(async (tx) => {
-      // Compare-and-set: apply only from the state we reconciled; a concurrent
-      // mutation (admin refund endpoint, seller action) makes this a no-op and
-      // the next event or manual reconciliation covers it.
-      const rows = await tx.order.updateMany({
-        where: {
+    const outcome = await db.$transaction(async (tx) =>
+      applyRefundReconciliation(
+        {
           id: order.id,
           status: order.status,
           refundedCents: order.refundedCents,
+          listingId: order.listingId,
+          quantity: order.quantity,
         },
-        data: {
-          status: reconciled.status,
-          refundedCents: reconciled.refundedCents,
-          ...(reconciled.status === "CANCELLED" && {
-            cancelledAt: new Date(),
-            cancelReason: "Refunded",
-          }),
-        },
-      });
-
-      if (rows.count === 0) return 0;
-
-      // Restore stock exactly once: only on the guarded reconciled INTO
-      // CANCELLED for orders that were not fulfilled — partial refunds and
-      // repeated refund events must not duplicate inventory back.
-      if (reconciled.restoreStock) {
-        await tx.eggListing.update({
-          where: { id: order.listingId },
-          data: {
-            stockCount: { increment: order.quantity },
+        reconciled,
+        {
+          // Apply the shared guarded spec verbatim: a concurrent mutation
+          // (admin refund endpoint, seller action) makes this a no-op and
+          // the next event or manual reconciliation covers it.
+          updateOrderGuarded: async (spec) => {
+            const rows = await tx.order.updateMany(spec);
+            return rows.count;
           },
-        });
-      }
+          restoreStock: async (listingId, quantity) => {
+            await tx.eggListing.update({
+              where: { id: listingId },
+              data: { stockCount: { increment: quantity } },
+            });
+          },
+          logAudit: async (entry) => {
+            await logOrderStatusChange({
+              orderId: order.id,
+              fromStatus: entry.fromStatus,
+              toStatus: entry.toStatus,
+              changedByType: "SYSTEM",
+              reason: "Refunded via Stripe",
+              metadata: {
+                stripeEventId: eventId,
+                stripeChargeId: charge.id,
+                stripePaymentIntentId: paymentIntentId,
+                refundedCents: entry.refundedCents,
+                cumulativeRefunded: cumulativeRefundedCents,
+              },
+              tx,
+            });
+          },
+        }
+      )
+    );
 
-      await logOrderStatusChange({
-        orderId: order.id,
-        fromStatus: order.status,
-        toStatus: reconciled.status,
-        changedByType: "SYSTEM",
-        reason: "Refunded via Stripe",
-        metadata: {
-          stripeEventId: eventId,
-          stripeChargeId: charge.id,
-          stripePaymentIntentId: paymentIntentId,
-          refundedCents: reconciled.refundedCents,
-          cumulativeRefunded: cumulativeRefundedCents,
-        },
-        tx,
-      });
-
-      return rows.count;
-    });
-
-    if (updatedRows === 0) {
+    if (!outcome.applied) {
       console.log(
         `[stripe-webhook] Order ${order.id} changed concurrently during refund reconciliation — skipped`
       );

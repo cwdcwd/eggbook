@@ -4,6 +4,7 @@ import {
   dollarsToCents,
   centsToDollars,
   nextRefundState,
+  checkoutClaimSpec,
 } from "../src/lib/payment-integrity";
 
 test("money converts decimal dollars to exact integer cents", () => {
@@ -129,4 +130,17 @@ test("webhook payment attach never resurrects cancelled orders", () => {
   for (const status of ["PENDING", "CANCELLED", "DECLINED"]) {
     assert.equal(paymentEventAction(status), "skip");
   }
+});
+
+test("the checkout session claim's compare-and-set requires the order's current status", () => {
+  // The claim must win only from the exact state the creator read: same session
+  // slot, and the order still seller-confirmed.
+  assert.deepEqual(checkoutClaimSpec("o1", null, "cs_new"), {
+    where: { id: "o1", checkoutSessionId: null, status: "CONFIRMED" },
+    data: { checkoutSessionId: "cs_new" },
+  });
+  assert.deepEqual(checkoutClaimSpec("o1", "cs_old", "cs_new"), {
+    where: { id: "o1", checkoutSessionId: "cs_old", status: "CONFIRMED" },
+    data: { checkoutSessionId: "cs_new" },
+  });
 });

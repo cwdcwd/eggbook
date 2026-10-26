@@ -142,6 +142,36 @@ export function nextCheckoutAction(
 }
 
 // ---------------------------------------------------------------------------
+// Persistence-boundary CAS contract (checkout session claim)
+// ---------------------------------------------------------------------------
+
+export interface CheckoutClaimSpec {
+  where: { id: string; checkoutSessionId: string | null; status: "CONFIRMED" };
+  data: { checkoutSessionId: string };
+}
+
+/**
+ * The compare-and-set a checkout creator must apply to attach a NEW session:
+ * it wins only when the order is still seller-confirmed and still holds the
+ * session this attempt observed (absent, or the one it just read). A concurrent
+ * cancellation, decline, or payment leaves the order outside the claim and the
+ * row count comes back zero — the caller then expires the session it minted.
+ *
+ * Held in one place so routes, the flow module, and the regression tests apply
+ * the exact same where/data spec.
+ */
+export function checkoutClaimSpec(
+  orderId: string,
+  previousSessionId: string | null,
+  newSessionId: string,
+): CheckoutClaimSpec {
+  return {
+    where: { id: orderId, checkoutSessionId: previousSessionId, status: "CONFIRMED" },
+    data: { checkoutSessionId: newSessionId },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Stripe refund reconciliation (charge.amount_refunded based)
 // ---------------------------------------------------------------------------
 

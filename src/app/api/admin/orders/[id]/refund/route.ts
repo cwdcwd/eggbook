@@ -5,6 +5,7 @@ import { createRefund, stripe } from "@/lib/stripe";
 import { verifyAdmin } from "@/lib/auth";
 import { AdminRefundSchema } from "@/lib/schemas";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { applyRefundReconciliation } from "@/lib/refund-reconciliation";
 import {
   applyCumulativeRefund,
   centsToDollars,
@@ -155,56 +156,52 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // in one guarded transaction: only applies from the state we reconciled,
     // so it runs exactly once even against concurrent webhook reconciliation.
     const cancelReason = reason || "Refund issued by admin";
-    const updatedRows = await db.$transaction(async (tx) => {
-      const rows = await tx.order.updateMany({
-        where: {
+    const outcome = await db.$transaction(async (tx) =>
+      applyRefundReconciliation(
+        {
           id,
           status: order.status,
           refundedCents: order.refundedCents,
+          listingId: order.listingId,
+          quantity: order.quantity,
         },
-        data: {
-          status: transition.status,
-          refundedCents: transition.refundedCents,
-          ...(transition.status === "CANCELLED" && {
-            cancelledAt: new Date(),
-            cancelReason,
-          }),
-        },
-      });
-
-      if (rows.count === 0) {
-        return { count: 0 };
-      }
-
-      // Restore stock exactly once: only on the transition into CANCELLED, and
-      // never for orders that were already fulfilled (COMPLETED).
-      if (transition.status === "CANCELLED" && transition.restoreStock && order.status !== "COMPLETED") {
-        await tx.eggListing.update({
-          where: { id: order.listingId },
-          data: {
-            stockCount: { increment: order.quantity },
+        transition,
+        {
+          // Apply the shared guarded spec verbatim; a concurrent webhook
+          // reconciliation or seller transition makes this a no-op and the
+          // manual-reconciliation path below surfaces it.
+          updateOrderGuarded: async (spec) => {
+            const rows = await tx.order.updateMany(spec);
+            return rows.count;
           },
-        });
-      }
-
-      await logOrderStatusChange({
-        orderId: id,
-        fromStatus: order.status,
-        toStatus: transition.status,
-        changedBy: userId,
-        changedByType: "ADMIN",
-        reason: cancelReason,
-        metadata: {
-          stripeRefundId: refund.id,
-          refundedCents: transition.refundedCents,
-          cumulativeRefunded: charge.amount_refunded,
+          restoreStock: async (listingId, quantity) => {
+            await tx.eggListing.update({
+              where: { id: listingId },
+              data: { stockCount: { increment: quantity } },
+            });
+          },
+          logAudit: async (entry) => {
+            await logOrderStatusChange({
+              orderId: id,
+              fromStatus: entry.fromStatus,
+              toStatus: entry.toStatus,
+              changedBy: userId,
+              changedByType: "ADMIN",
+              reason: cancelReason,
+              metadata: {
+                stripeRefundId: refund.id,
+                refundedCents: entry.refundedCents,
+                cumulativeRefunded: charge.amount_refunded,
+              },
+              tx,
+            });
+          },
         },
-        tx,
-      });
-      return { count: rows.count };
-    });
+        { cancelReason }
+      )
+    );
 
-    if (updatedRows.count === 0) {
+    if (!outcome.applied) {
       // Money has moved; record what happened so a human can reconcile.
       await logOrderStatusChange({
         orderId: id,
@@ -230,8 +227,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       message: "Refund issued successfully",
       refundId: refund.id,
       amount: centsToDollars(refund.amount),
-      refundedCents: transition.refundedCents,
-      orderStatus: transition.status,
+      refundedCents: outcome.refundedCents,
+      orderStatus: outcome.orderStatus,
     });
   } catch (error) {
     console.error("Error issuing refund:", error);
