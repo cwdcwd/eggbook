@@ -26,7 +26,7 @@ interface Conversation {
   buyer: { id: string; username: string };
   seller: { id: string; username: string };
   messages: Message[];
-  _count?: { messages: number };
+  unreadCount?: number;
 }
 
 function MessagesPageContent() {
@@ -41,7 +41,6 @@ function MessagesPageContent() {
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isStartingConversation, setIsStartingConversation] = useState(false);
-  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const orderProcessedRef = useRef<string | null>(null);
 
@@ -125,9 +124,6 @@ function MessagesPageContent() {
       const data = await res.json();
       const convos = data.conversations || data;
       setConversations(Array.isArray(convos) ? convos : []);
-      if (data.userId) {
-        setDbUserId(data.userId);
-      }
     } catch (error) {
       console.error("Error fetching conversations:", error);
       setConversations([]);
@@ -142,12 +138,14 @@ function MessagesPageContent() {
 
   // Real-time: refresh conversation list when a new message arrives (for any conversation)
   useEffect(() => {
-    if (!dbUserId) return;
+    const clerkId = user?.id;
+    if (!clerkId) return;
 
     const pusher = getPusherClient();
     if (!pusher) return;
 
-    const channel = pusher.subscribe(CHANNELS.user(dbUserId));
+    // User channel is keyed by Clerk ID and served by /api/pusherauth
+    const channel = pusher.subscribe(CHANNELS.user(clerkId));
 
     channel.bind(EVENTS.USER_NEW_MESSAGE, () => {
       fetchConversations();
@@ -155,9 +153,9 @@ function MessagesPageContent() {
 
     return () => {
       channel.unbind(EVENTS.USER_NEW_MESSAGE);
-      pusher.unsubscribe(CHANNELS.user(dbUserId));
+      pusher.unsubscribe(CHANNELS.user(clerkId));
     };
-  }, [dbUserId, fetchConversations]);
+  }, [user?.id, fetchConversations]);
 
   // Handle order parameter to start conversation
   useEffect(() => {
@@ -317,9 +315,9 @@ function MessagesPageContent() {
                     <p className="font-medium text-amber-900 truncate">
                       @{getOtherUser(conv).username}
                     </p>
-                    {conv._count && conv._count.messages > 0 && (
+                    {conv.unreadCount != null && conv.unreadCount > 0 && (
                       <span className="bg-amber-500 text-white text-xs rounded-full px-2 py-0.5">
-                        {conv._count.messages}
+                        {conv.unreadCount}
                       </span>
                     )}
                   </div>

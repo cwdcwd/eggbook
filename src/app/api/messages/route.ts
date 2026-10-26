@@ -4,152 +4,11 @@ import { db } from "@/lib/db";
 import { triggerNewMessage, triggerUserNewMessage, triggerMessagesRead } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
-import { SendMessageSchema } from "@/lib/schemas";
 import { rateLimit } from "@/lib/rate-limit";
+import { serializeMessage } from "@/lib/message-view";
+import { SendMessageSchema } from "@/lib/schemas";
 
-// Send a message
-export async function POST(req: NextRequest) {
-  try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const rl = await rateLimit(userId, "message");
-    if (!rl.success) return rl.response;
-
-    const body = await req.json();
-    const parsed = SendMessageSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
-    }
-    const { conversationId, content, recipientId } = parsed.data;
-
-    const user = await getOrCreateUser(userId);
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    let conversation;
-
-    if (conversationId) {
-      // Use existing conversation (include buyer/seller for push notification clerkId)
-      conversation = await db.conversation.findUnique({
-        where: { id: conversationId },
-        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
-      });
-
-      if (!conversation) {
-        return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
-      }
-
-      // Verify user is part of conversation
-      if (conversation.buyerId !== user.id && conversation.sellerId !== user.id) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-      }
-    } else if (recipientId) {
-      // Find or create conversation
-      conversation = await db.conversation.findFirst({
-        where: {
-          OR: [
-            { buyerId: user.id, sellerId: recipientId },
-            { buyerId: recipientId, sellerId: user.id },
-          ],
-        },
-        include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
-      });
-
-      if (!conversation) {
-        // Determine buyer/seller roles based on user roles
-        const recipient = await db.user.findUnique({
-          where: { id: recipientId },
-          include: { sellerProfile: true },
-        });
-
-        if (!recipient) {
-          return NextResponse.json({ error: "Recipient not found" }, { status: 404 });
-        }
-
-        // If recipient is a seller, current user is buyer
-        const isBuyer = recipient.sellerProfile !== null;
-
-        conversation = await db.conversation.create({
-          data: {
-            buyerId: isBuyer ? user.id : recipientId,
-            sellerId: isBuyer ? recipientId : user.id,
-          },
-          include: { buyer: { select: { clerkId: true } }, seller: { select: { clerkId: true } } },
-        });
-      }
-    } else {
-      return NextResponse.json(
-        { error: "conversationId or recipientId required" },
-        { status: 400 }
-      );
-    }
-
-    // Create message
-    const message = await db.message.create({
-      data: {
-        conversationId: conversation.id,
-        senderId: user.id,
-        content,
-      },
-      include: {
-        sender: true,
-      },
-    });
-
-    // Update conversation timestamp
-    await db.conversation.update({
-      where: { id: conversation.id },
-      data: { updatedAt: new Date() },
-    });
-
-    // Trigger real-time notification
-    await triggerNewMessage(conversation.id, {
-      id: message.id,
-      content: message.content,
-      senderId: message.senderId,
-      createdAt: message.createdAt,
-      sender: {
-        id: message.sender.id,
-        username: message.sender.username,
-      },
-    });
-
-    // Notify the recipient about the new message (for unread badge)
-    const recipientUserId = conversation.buyerId === user.id 
-      ? conversation.sellerId 
-      : conversation.buyerId;
-    await triggerUserNewMessage(recipientUserId, {
-      conversationId: conversation.id,
-      senderId: user.id,
-      senderUsername: user.username,
-    });
-
-    // Push notification via Beams (clerkId included from conversation query)
-    const recipientClerkId = conversation.buyerId === user.id
-      ? conversation.seller.clerkId
-      : conversation.buyer.clerkId;
-    // Push notification via Beams (runs after response is sent)
-    after(async () => {
-      await notifyUser(recipientClerkId, {
-        title: `New message from ${user.username}`,
-        body: content.length > 100 ? content.slice(0, 100) + "..." : content,
-        deepLink: `/dashboard/messages`,
-      });
-    });
-
-    return NextResponse.json(message);
-  } catch (error) {
-    console.error("Error sending message:", error);
-    return NextResponse.json({ error: "Failed to send message" }, { status: 500 });
-  }
-}
-
-// Get conversations for current user
+// Get conversations for the current user, or messages for one conversation
 export async function GET(req: NextRequest) {
   try {
     const { userId } = await auth();
@@ -158,26 +17,25 @@ export async function GET(req: NextRequest) {
     }
 
     const user = await getOrCreateUser(userId);
-
     if (!user) {
-      // User could not be created - return empty array
-      return NextResponse.json([]);
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
     const conversationId = searchParams.get("conversationId");
 
+    // Get messages for a specific conversation (participants only;
+    // cuid unguessability is a convenience, never the access check)
     if (conversationId) {
-      // Get messages for specific conversation
-      const conversation = await db.conversation.findUnique({
-        where: { id: conversationId },
-        include: {
-          messages: {
-            orderBy: { createdAt: "asc" },
-            include: { sender: true },
-          },
-          buyer: true,
-          seller: true,
+      const conversation = await db.conversation.findFirst({
+        where: {
+          id: conversationId,
+          OR: [{ buyerId: user.id }, { sellerId: user.id }],
+        },
+        select: {
+          id: true,
+          buyer: { select: { id: true, clerkId: true } },
+          seller: { select: { id: true, clerkId: true } },
         },
       });
 
@@ -185,70 +43,220 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
       }
 
-      if (conversation.buyerId !== user.id && conversation.sellerId !== user.id) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-      }
+      const messages = await db.message.findMany({
+        where: { conversationId: conversation.id },
+        include: { sender: { select: { id: true, username: true } } },
+        orderBy: { createdAt: "asc" },
+      });
 
-      // Mark messages as read
-      const unreadMessages = await db.message.findMany({
+      // Viewing the thread marks the other party's unread messages read
+      // (base read-tracking restored; only a participant reaches here).
+      const unread = await db.message.findMany({
         where: {
-          conversationId,
+          conversationId: conversation.id,
           senderId: { not: user.id },
           read: false,
         },
         select: { senderId: true },
       });
-
-      if (unreadMessages.length > 0) {
+      if (unread.length > 0) {
         await db.message.updateMany({
           where: {
-            conversationId,
+            conversationId: conversation.id,
             senderId: { not: user.id },
             read: false,
           },
           data: { read: true },
         });
 
-        // Notify senders that their messages were read
-        const senderIds = [...new Set(unreadMessages.map(m => m.senderId))];
-        for (const senderId of senderIds) {
-          await triggerMessagesRead(senderId, conversationId);
+        // Read receipt rides the other party's private user channel, keyed
+        // by Clerk id (see /api/pusherauth)
+        const other =
+          conversation.buyer.id === user.id ? conversation.seller : conversation.buyer;
+        if (other.clerkId) {
+          await triggerMessagesRead(other.clerkId, conversation.id);
         }
       }
 
-      return NextResponse.json(conversation);
-    } else {
-      // Get all conversations
-      const conversations = await db.conversation.findMany({
-        where: {
-          OR: [{ buyerId: user.id }, { sellerId: user.id }],
+      return NextResponse.json({ messages: messages.map(serializeMessage) });
+    }
+
+    // Get all conversations for the user with the latest message and sender names
+    const conversations = await db.conversation.findMany({
+      where: {
+        OR: [{ buyerId: user.id }, { sellerId: user.id }],
+      },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        buyer: { select: { id: true, username: true } },
+        seller: { select: { id: true, username: true } },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          include: { sender: { select: { id: true, username: true } } },
         },
-        include: {
-          buyer: true,
-          seller: true,
-          messages: {
-            take: 1,
-            orderBy: { createdAt: "desc" },
-          },
-          _count: {
-            select: {
-              messages: {
-                where: {
-                  senderId: { not: user.id },
-                  read: false,
-                },
+        _count: {
+          select: {
+            messages: {
+              where: {
+                read: false,
+                NOT: { senderId: user.id },
               },
             },
           },
         },
-        orderBy: { updatedAt: "desc" },
-      });
+      },
+    });
 
-      // Include userId for Pusher subscription
-      return NextResponse.json({ conversations, userId: user.id });
-    }
+    return NextResponse.json({
+      conversations: conversations.map((conv) => ({
+        id: conv.id,
+        buyerId: conv.buyerId,
+        sellerId: conv.sellerId,
+        buyer: conv.buyer,
+        seller: conv.seller,
+        messages: conv.messages.map(serializeMessage),
+        unreadCount: conv._count.messages,
+      })),
+      unreadTotal: conversations.reduce((sum, conv) => sum + conv._count.messages, 0),
+    });
   } catch (error) {
-    console.error("Error fetching messages:", error);
+    const kind = error instanceof Error ? error.name : "unknown";
+    console.error("Error fetching messages:", kind);
     return NextResponse.json({ error: "Failed to fetch messages" }, { status: 500 });
   }
 }
+
+// Send a message (creates or reuses the 1:1 conversation between the two users)
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rl = await rateLimit(userId, "mutation");
+    if (!rl.success) return rl.response;
+
+    const user = await getOrCreateUser(userId);
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const body = await req.json();
+    const parsed = SendMessageSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.issues }, { status: 400 });
+    }
+
+    const { recipientId, content, conversationId } = parsed.data;
+
+    // If conversationId is provided, verify the user is a participant
+    if (conversationId) {
+      const conversation = await db.conversation.findFirst({
+        where: {
+          id: conversationId,
+          OR: [{ buyerId: user.id }, { sellerId: user.id }],
+        },
+        select: { id: true },
+      });
+
+      if (!conversation) {
+        return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+      }
+    } else if (recipientId) {
+      // New conversation: find existing between the two users, else create
+      const existing = await db.conversation.findFirst({
+        where: {
+          OR: [
+            { buyerId: user.id, sellerId: recipientId },
+            { buyerId: recipientId, sellerId: user.id },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (existing) {
+        parsed.data.conversationId = existing.id;
+      } else {
+        // Recipient must exist
+        const recipient = await db.user.findUnique({
+          where: { id: recipientId },
+          select: { id: true },
+        });
+        if (!recipient) {
+          return NextResponse.json({ error: "Recipient not found" }, { status: 404 });
+        }
+
+        const created = await db.conversation.create({
+          data: {
+            buyerId: user.id,
+            sellerId: recipient.id,
+          },
+          select: { id: true },
+        });
+        parsed.data.conversationId = created.id;
+      }
+    } else {
+      return NextResponse.json({ error: "recipientId or conversationId required" }, { status: 400 });
+    }
+
+    const conversationId2 = parsed.data.conversationId!;
+
+    // Create the message
+    const message = await db.message.create({
+      data: {
+        conversationId: conversationId2,
+        senderId: user.id,
+        content: content.trim(),
+      },
+      include: { sender: { select: { id: true, username: true } } },
+    });
+
+    // Bump conversation recency — GET-all orders conversations by updatedAt desc
+    await db.conversation.update({
+      where: { id: conversationId2 },
+      data: { updatedAt: new Date() },
+    });
+
+    // Serialize: strip sensitive fields before pushing to realtime/API
+    const safeMessage = serializeMessage(message);
+
+    // Realtime: conversation room (both parties) + recipient unread badge
+    await triggerNewMessage(conversationId2, safeMessage);
+
+    const recipients = await db.conversation.findUnique({
+      where: { id: conversationId2 },
+      select: {
+        buyer: { select: { id: true, clerkId: true } },
+        seller: { select: { id: true, clerkId: true } },
+      },
+    });
+    if (recipients) {
+      const other = recipients.buyer.id === user.id ? recipients.seller : recipients.buyer;
+      // user channels are keyed by Clerk ID (see /api/pusherauth)
+      await triggerUserNewMessage(other.clerkId, {
+        conversationId: conversationId2,
+        senderId: user.id,
+        senderUsername: user.username,
+      });
+
+      // Push notification via Beams (runs after response is sent)
+      after(async () => {
+        await notifyUser(other.clerkId, {
+          title: `New message from @${user.username}`,
+          body: content.slice(0, 120),
+          deepLink: `/messages?conversation=${conversationId2}`,
+        });
+      });
+    }
+
+    // Mark this message unread for the recipient (it's new)
+    return NextResponse.json(safeMessage, { status: 201 });
+  } catch (error) {
+    const kind = error instanceof Error ? error.name : "unknown";
+    console.error("Error sending message:", kind);
+    return NextResponse.json({ error: "Failed to send message" }, { status: 500 });
+  }
+}
+

@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
 import { rateLimit } from "@/lib/rate-limit";
+import { sniffImageType, type SniffedImageType } from "@/lib/image-sniff";
+
+const MAX_SIZE = 5 * 1024 * 1024;
+
+const mimeToExt: Record<SniffedImageType, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,50 +24,52 @@ export async function POST(req: NextRequest) {
     if (!rl.success) return rl.response;
 
     const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const file = formData.get("file") as File | null;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Validate file type
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-    if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: "Invalid file type. Only images are allowed." },
-        { status: 400 }
-      );
-    }
-
-    // Validate file size (max 5MB)
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
+    // Validate file size (max 5MB) BEFORE buffering
+    if (file.size > MAX_SIZE) {
       return NextResponse.json(
         { error: "File too large. Max size is 5MB." },
         { status: 400 }
       );
     }
 
-    // Generate unique filename (derive extension from validated MIME type, not user filename)
-    const mimeToExt: Record<string, string> = {
-      "image/jpeg": "jpg",
-      "image/png": "png",
-      "image/webp": "webp",
-      "image/gif": "gif",
-    };
+    // Validate file type by CONTENT, not the caller-controlled MIME type:
+    // the multipart file.type is attacker-controlled metadata, and previously
+    // any body whose headers claimed image/* was stored verbatim on our blob
+    // origin. Sniff the leading magic bytes and allow only real images.
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length === 0) {
+      return NextResponse.json({ error: "Empty file" }, { status: 400 });
+    }
+    const sniffed = sniffImageType(bytes);
+    if (!sniffed) {
+      return NextResponse.json(
+        { error: "Invalid file type. Only images are allowed." },
+        { status: 400 }
+      );
+    }
+
+    // Store the re-validated content; filename is derived server-side from the
+    // SNIFFED type — never from the user's filename or claimed MIME.
+    const extension = mimeToExt[sniffed];
     const timestamp = Date.now();
-    const extension = mimeToExt[file.type] || "jpg";
     const filename = `${userId}/${timestamp}.${extension}`;
 
-    // Upload to Vercel Blob
     const blob = await put(filename, file, {
       access: "public",
       addRandomSuffix: true,
+      contentType: sniffed,
     });
 
     return NextResponse.json({ url: blob.url });
   } catch (error) {
-    console.error("Error uploading file:", error);
+    const kind = error instanceof Error ? error.name : "unknown";
+    console.error("Error uploading file:", kind);
     return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
   }
 }

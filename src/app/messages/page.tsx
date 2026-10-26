@@ -27,7 +27,7 @@ interface Conversation {
   buyer: { id: string; username: string };
   seller: { id: string; username: string };
   messages: Message[];
-  _count?: { messages: number };
+  unreadCount?: number;
 }
 
 function MessagesPageContent() {
@@ -325,9 +325,9 @@ function MessagesPageContent() {
                       <p className="font-medium text-amber-900 truncate">
                         @{getOtherUser(conv).username}
                       </p>
-                      {conv._count && conv._count.messages > 0 && (
+                      {conv.unreadCount != null && conv.unreadCount > 0 && (
                         <span className="bg-amber-500 text-white text-xs rounded-full px-2 py-0.5">
-                          {conv._count.messages}
+                          {conv.unreadCount}
                         </span>
                       )}
                     </div>
