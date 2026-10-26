@@ -13,7 +13,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:cleanup": "tsx scripts/cleanup.ts",
     "db:cleanup:dry": "tsx scripts/cleanup.ts --dry-run",
-    "db:reset": "tsx scripts/cleanup.ts --force && tsx scripts/seed.ts"
+    "db:reset": "tsx scripts/cleanup.ts --force && tsx scripts/seed.ts",
+    "test:security": "tsx scripts/security-tests.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.0.7",

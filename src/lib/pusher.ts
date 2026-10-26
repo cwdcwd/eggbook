@@ -60,12 +60,9 @@ export async function triggerNewOrder(
 }
 
 // Notify a user about an order status change.
-// NOTE: userId here should be a Clerk ID (clerkId), matching the subscription
-// in dashboard/layout.tsx which subscribes to CHANNELS.user(clerkUserId).
-// We intentionally reuse CHANNELS.user() for both ID types because the channel
-// name is opaque to Pusher — what matters is publish/subscribe consistency per
-// feature (orders use clerkId, messages use dbUserId). Splitting into separate
-// helpers would add indirection without preventing misuse at call sites.
+// NOTE: userId here must be a Clerk ID (clerkId): user channels are keyed by
+// Clerk ID and authorized by /api/pusherauth (private-user-<clerkId> may only
+// be subscribed by the owner of that Clerk account).
 export async function triggerOrderUpdate(
   userId: string,
   update: {
@@ -79,8 +76,8 @@ export async function triggerOrderUpdate(
 }
 
 // Notify a user about a new message (for unread badge).
-// NOTE: recipientId here should be a DB user ID, matching the subscription
-// in dashboard/layout.tsx which subscribes to CHANNELS.user(dbUserId).
+// NOTE: recipientId must be the recipient's Clerk ID (clerkId), matching the
+// subscription in dashboard/layout.tsx and the /api/pusherauth allow-list.
 export async function triggerUserNewMessage(
   recipientId: string,
   message: {
@@ -108,4 +105,30 @@ export async function triggerMessagesRead(
     EVENTS.MESSAGES_READ,
     { conversationId }
   )
+}
+
+// Decide whether the authenticated caller may subscribe to a requested Pusher
+// channel. Centralized so the channel-auth endpoint and its tests share one
+// allow-list. Rules:
+//   private-user-<clerkId>                → only the owner of that clerkId
+//   private-seller-<clerkId>              → only that seller (the user themself)
+//   private-conversation-<conversationId> → only participants of the conversation
+// Unknown namespaces / public channels (no private- prefix) → always denied.
+export function isChannelAuthAllowed(
+  channel: string,
+  ctx: { clerkId: string; dbUserId: string; conversationIds: Set<string> }
+): boolean {
+  if (!channel.startsWith('private-')) return false
+  const resource = channel.slice('private-'.length)
+  if (resource.startsWith('user-')) {
+    return resource.length > 'user-'.length && resource.slice('user-'.length) === ctx.clerkId
+  }
+  if (resource.startsWith('seller-')) {
+    return resource.length > 'seller-'.length && resource.slice('seller-'.length) === ctx.clerkId
+  }
+  if (resource.startsWith('conversation-')) {
+    const id = resource.slice('conversation-'.length)
+    return id.length > 0 && ctx.conversationIds.has(id)
+  }
+  return false
 }

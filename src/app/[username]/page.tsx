@@ -12,30 +12,45 @@ import type { User, SellerProfile, EggListing, Tag, Post } from "@/lib/prisma-ty
 export const dynamic = 'force-dynamic';
 
 type ListingWithTags = EggListing & { tags: Tag[] };
-type SellerProfileWithRelations = SellerProfile & { listings: ListingWithTags[]; posts: Post[] };
-type UserWithProfile = User & { sellerProfile: SellerProfileWithRelations };
+// Public profile page (this route is reachable without auth): select only the
+// fields this component renders. Never widen this to include — SellerProfile
+// also holds address, zip, lat/lng and Stripe-related fields that must never
+// appear in a public page's RSC payload.
+type PublicSellerProfile = Pick<
+  SellerProfile,
+  "id" | "displayName" | "bio" | "avatarUrl" | "city" | "state" | "isActive" | "pickupType" | "maxDeliveryDistance"
+> & { listings: ListingWithTags[]; posts: Post[] };
+type PublicSellerPageData = Pick<User, "id" | "username"> & { sellerProfile: PublicSellerProfile | null };
 
-async function getSellerByUsername(username: string): Promise<UserWithProfile | null> {
-  console.log("Querying for username:", username);
-  
-  // Debug: Log all users
-  const allUsers = await db.user.findMany({ 
-    select: { username: true, role: true },
-  });
-  console.log("All users in DB:", allUsers);
-  
+async function getSellerPageData(username: string): Promise<PublicSellerPageData | null> {
+  // Deliberately scoped query: exact username only. The previous version did a
+  // db.user.findMany() of the whole users table ("allUsers") and console.log'd
+  // it on every public page view — a full platform user-list disclosure.
   const user = await db.user.findUnique({
     where: { username },
-    include: {
+    select: {
+      id: true,
+      username: true,
       sellerProfile: {
-        include: {
+        select: {
+          id: true,
+          displayName: true,
+          bio: true,
+          avatarUrl: true,
+          city: true,
+          state: true,
+          isActive: true,
+          pickupType: true,
+          maxDeliveryDistance: true,
           listings: {
-            where: { isAvailable: true },
+            // Hidden-by-subscription-expiry listings must not leak publicly.
+            where: { isAvailable: true, hiddenBySubscription: false },
             include: { tags: true },
           },
           posts: {
             take: 10,
             orderBy: { createdAt: "desc" },
+            select: { id: true, content: true, imageUrl: true, createdAt: true },
           },
         },
       },
@@ -43,7 +58,7 @@ async function getSellerByUsername(username: string): Promise<UserWithProfile | 
   });
 
   if (!user?.sellerProfile) return null;
-  return user as UserWithProfile;
+  return user as PublicSellerPageData;
 }
 
 export default async function SellerProfilePage({
@@ -56,9 +71,7 @@ export default async function SellerProfilePage({
   
   // Remove @ if present and decode URL encoding
   const username = decodeURIComponent(rawUsername).replace(/^@/, "");
-  console.log("Profile page - rawUsername:", rawUsername, "parsed username:", username);
-  const seller = await getSellerByUsername(username);
-  console.log("Profile page - seller found:", !!seller, "has profile:", !!seller?.sellerProfile);
+  const seller = await getSellerPageData(username);
 
   if (!seller || !seller.sellerProfile) {
     notFound();

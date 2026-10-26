@@ -36,7 +36,6 @@ export default function DashboardLayout({
   const { userId: clerkUserId } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
-  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const lastPathRef = useRef(pathname);
   const pathnameRef = useRef(pathname);
   
@@ -62,15 +61,9 @@ export default function DashboardLayout({
         const res = await fetch("/api/messages");
         if (res.ok && !cancelled) {
           const data = await res.json();
-          // API returns { conversations: [...], userId: string }
-          if (data.userId) {
-            setDbUserId(data.userId);
-          }
-          if (Array.isArray(data.conversations)) {
-            const total = data.conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
-              return sum + (conv._count?.messages || 0);
-            }, 0);
-            setUnreadCount(total);
+          // API returns { conversations: [...], unreadTotal: number }
+          if (typeof data.unreadTotal === "number") {
+            setUnreadCount(data.unreadTotal);
           } else if (Array.isArray(data)) {
             // Fallback for old response format
             const total = data.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
@@ -110,15 +103,16 @@ export default function DashboardLayout({
     return () => { cancelled = true; };
   }, []);
 
-  // Subscribe to Pusher for real-time unread updates
+  // Subscribe to Pusher for real-time unread updates.
+  // The user channel is keyed by Clerk ID and authorized by /api/pusherauth.
   useEffect(() => {
-    if (!dbUserId) return;
+    if (!clerkUserId) return;
 
     const pusher = getPusherClient();
     if (!pusher) return;
 
-    const channel = pusher.subscribe(CHANNELS.user(dbUserId));
-    
+    const channel = pusher.subscribe(CHANNELS.user(clerkUserId));
+
     channel.bind(EVENTS.USER_NEW_MESSAGE, () => {
       // Increment unread count when a new message arrives
       // Only if we're not on the messages page
@@ -134,9 +128,9 @@ export default function DashboardLayout({
 
     return () => {
       channel.unbind_all();
-      pusher.unsubscribe(CHANNELS.user(dbUserId));
+      pusher.unsubscribe(CHANNELS.user(clerkUserId));
     };
-  }, [dbUserId]);
+  }, [clerkUserId]);
 
   // Subscribe to Pusher for order updates (new orders and status changes)
   useEffect(() => {
@@ -189,11 +183,8 @@ export default function DashboardLayout({
           const res = await fetch("/api/messages");
           if (res.ok && !cancelled) {
             const data = await res.json();
-            if (Array.isArray(data.conversations)) {
-              const total = data.conversations.reduce((sum: number, conv: { _count?: { messages?: number } }) => {
-                return sum + (conv._count?.messages || 0);
-              }, 0);
-              setUnreadCount(total);
+            if (typeof data.unreadTotal === "number") {
+              setUnreadCount(data.unreadTotal);
             }
           }
         } catch (error) {

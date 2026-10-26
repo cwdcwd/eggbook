@@ -10,8 +10,7 @@ import { getPusherClient, CHANNELS, EVENTS } from "@/lib/pusher-client";
  */
 export function usePusherRefresh(
   events: ("new-order" | "order-update" | "user-new-message")[],
-  onRefresh: () => void,
-  { dbUserId }: { dbUserId?: string | null } = {}
+  onRefresh: () => void
 ) {
   const { userId: clerkUserId } = useAuth();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,9 +50,10 @@ export function usePusherRefresh(
       channelNames.push(channelName);
     }
 
-    // Subscribe to user channel (by DB ID) for new messages
-    if (stableEvents.includes("user-new-message") && dbUserId) {
-      const channelName = CHANNELS.user(dbUserId);
+    // Subscribe to user channel for new messages (user channel = Clerk ID,
+    // authorized by /api/pusherauth — never the DB user id)
+    if (stableEvents.includes("user-new-message")) {
+      const channelName = CHANNELS.user(clerkUserId);
       const userChannel = pusher.subscribe(channelName);
       userChannel.bind(EVENTS.USER_NEW_MESSAGE, debouncedRefresh);
       channelNames.push(channelName);
@@ -65,5 +65,5 @@ export function usePusherRefresh(
         pusher.unsubscribe(name);
       });
     };
-  }, [clerkUserId, dbUserId, stableEvents, debouncedRefresh]);
+  }, [clerkUserId, stableEvents, debouncedRefresh]);
 }

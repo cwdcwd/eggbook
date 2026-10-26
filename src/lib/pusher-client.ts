@@ -15,12 +15,17 @@ let pusherClientInstance: PusherClient | null = null
 export function getPusherClient(): PusherClient | null {
   if (typeof window === 'undefined') return null
   if (!isClientPusherConfigured) return null
-  
+
   if (!pusherClientInstance) {
     pusherClientInstance = new PusherClient(
       process.env.NEXT_PUBLIC_PUSHER_KEY!,
       {
         cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+        // All app channels (user/seller/conversation) are private channels.
+        // Subscriptions are authorized server-side by /api/pusherauth, which
+        // verifies the signed-in Clerk user against the exact channel name.
+        // pusher-js performs the auth POST same-origin (cookies attached).
+        authEndpoint: '/api/pusherauth',
       }
     )
   }
