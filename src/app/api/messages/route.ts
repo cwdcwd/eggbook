@@ -6,7 +6,6 @@ import { notifyUser } from "@/lib/beams-server";
 import { getOrCreateUser } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { serializeMessage } from "@/lib/message-view";
-import { z } from "zod";
 import { SendMessageSchema } from "@/lib/schemas";
 
 // Get conversations for the current user, or messages for one conversation
@@ -33,7 +32,11 @@ export async function GET(req: NextRequest) {
           id: conversationId,
           OR: [{ buyerId: user.id }, { sellerId: user.id }],
         },
-        select: { id: true },
+        select: {
+          id: true,
+          buyer: { select: { id: true, clerkId: true } },
+          seller: { select: { id: true, clerkId: true } },
+        },
       });
 
       if (!conversation) {
@@ -45,6 +48,35 @@ export async function GET(req: NextRequest) {
         include: { sender: { select: { id: true, username: true } } },
         orderBy: { createdAt: "asc" },
       });
+
+      // Viewing the thread marks the other party's unread messages read
+      // (base read-tracking restored; only a participant reaches here).
+      const unread = await db.message.findMany({
+        where: {
+          conversationId: conversation.id,
+          senderId: { not: user.id },
+          read: false,
+        },
+        select: { senderId: true },
+      });
+      if (unread.length > 0) {
+        await db.message.updateMany({
+          where: {
+            conversationId: conversation.id,
+            senderId: { not: user.id },
+            read: false,
+          },
+          data: { read: true },
+        });
+
+        // Read receipt rides the other party's private user channel, keyed
+        // by Clerk id (see /api/pusherauth)
+        const other =
+          conversation.buyer.id === user.id ? conversation.seller : conversation.buyer;
+        if (other.clerkId) {
+          await triggerMessagesRead(other.clerkId, conversation.id);
+        }
+      }
 
       return NextResponse.json({ messages: messages.map(serializeMessage) });
     }
@@ -181,6 +213,12 @@ export async function POST(req: NextRequest) {
       include: { sender: { select: { id: true, username: true } } },
     });
 
+    // Bump conversation recency — GET-all orders conversations by updatedAt desc
+    await db.conversation.update({
+      where: { id: conversationId2 },
+      data: { updatedAt: new Date() },
+    });
+
     // Serialize: strip sensitive fields before pushing to realtime/API
     const safeMessage = serializeMessage(message);
 
@@ -222,67 +260,3 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Mark a conversation as read
-export async function PUT(req: NextRequest) {
-  try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const user = await getOrCreateUser(userId);
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    const body = await req.json();
-    const parsed = z.object({ conversationId: z.string().min(1) }).safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
-    }
-    const conversationId = parsed.data.conversationId;
-
-    // Only participants may mark the conversation read
-    const conversation = await db.conversation.findFirst({
-      where: {
-        id: conversationId,
-        OR: [{ buyerId: user.id }, { sellerId: user.id }],
-      },
-      select: {
-        buyer: { select: { clerkId: true } },
-        seller: { select: { clerkId: true } },
-      },
-    });
-
-    if (!conversation) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
-    }
-
-    // Mark all of the OTHER party's messages as read
-    const updated = await db.message.updateMany({
-      where: {
-        conversationId,
-        senderId: { not: user.id },
-        read: false,
-      },
-      data: { read: true },
-    });
-
-    // Tell the sender their messages were read (they listen on their user
-    // channel, keyed by Clerk ID — see /api/pusherauth)
-    // userId from auth() is the Clerk session id.
-    const otherClerkId =
-      conversation.buyer.clerkId === userId
-        ? conversation.seller.clerkId
-        : conversation.buyer.clerkId;
-    if (otherClerkId && updated.count > 0) {
-      await triggerMessagesRead(otherClerkId, conversationId);
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    const kind = error instanceof Error ? error.name : "unknown";
-    console.error("Error marking messages read:", kind);
-    return NextResponse.json({ error: "Failed to mark messages read" }, { status: 500 });
-  }
-}

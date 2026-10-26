@@ -208,6 +208,65 @@ test("rate limit (prod, Redis unreachable): fail-closed fallback does NOT allow 
 });
 
 // ---------------------------------------------------------------------------
+// messages flow — read-tracking, recency, and unread-badge contract (R1–R3)
+// ---------------------------------------------------------------------------
+// The route/page code touches Clerk auth + Prisma, which this harness does not
+// mock (route-level integration stays a residual): the rework contract is
+// pinned at source level so a future edit cannot silently re-drop the
+// behaviors the changes-requested review flagged.
+
+const readRepoSrc = async (rel: string): Promise<string> => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  return fs.readFileSync(path.join(process.cwd(), rel), "utf8");
+};
+
+test("R1: reading a conversation marks the other party's messages read in the participant-checked GET (no dead endpoint)", async () => {
+  const src = await readRepoSrc("src/app/api/messages/route.ts");
+  assert.ok(
+    /senderId: \{ not: user\.id \}[\s\S]{0,700}data: \{ read: true \}/.test(src),
+    "GET single-conversation branch must mark the other party's unread messages read"
+  );
+  assert.ok(
+    src.includes("triggerMessagesRead("),
+    "mark-read must fire the other party's read receipt"
+  );
+  assert.ok(
+    !/export async function PUT/.test(src),
+    "read-marking must not sit behind an endpoint no client calls (dead PUT)"
+  );
+});
+
+test("R2: POST bumps conversation recency (GET-all orders by updatedAt desc)", async () => {
+  const src = await readRepoSrc("src/app/api/messages/route.ts");
+  const bump = /db\.conversation\.update\(\{[\s\S]{0,160}updatedAt: new Date\(\)/.exec(src);
+  assert.ok(bump, "POST must restore the updatedAt bump");
+  const bumpAt = bump.index;
+  const triggerAt = src.indexOf("triggerNewMessage(");
+  assert.ok(triggerAt !== -1 && bumpAt < triggerAt, "the bump belongs to the POST send path");
+});
+
+test("R3: both messages pages consume unreadCount (no stale _count reads)", async () => {
+  for (const page of ["src/app/messages/page.tsx", "src/app/dashboard/messages/page.tsx"]) {
+    const src = await readRepoSrc(page);
+    assert.ok(!src.includes("_count"), `${page} must not read the removed _count field`);
+    assert.ok(src.includes("unreadCount"), `${page} must render the unreadCount badge`);
+  }
+});
+
+test("R3 (API contract): GET-all projects unreadCount and a top-level unreadTotal", async () => {
+  const src = await readRepoSrc("src/app/api/messages/route.ts");
+  assert.ok(src.includes("unreadCount: conv._count.messages"), "unreadCount must be projected");
+  assert.ok(src.includes("unreadTotal:"), "unreadTotal must be computed server-side");
+});
+
+test("sniff: PNG recognition requires the full 8-byte signature (truncated variants rejected)", async () => {
+  const { sniffImageType } = await import("../src/lib/image-sniff");
+  assert.equal(sniffImageType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03, 0x04])), null);
+  assert.equal(sniffImageType(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), null);
+});
+
+// ---------------------------------------------------------------------------
 // Runner (plain harness, no framework)
 // ---------------------------------------------------------------------------
 async function run() {
