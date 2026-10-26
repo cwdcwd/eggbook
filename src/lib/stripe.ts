@@ -162,3 +162,23 @@ export async function createRefund(paymentIntentId: string, amount?: number) {
   })
   return refund
 }
+
+// Expire an open checkout session (best-effort) so a cancelled order's
+// pending session can no longer be paid. Safe to call repeatedly and with
+// sessions that are already completed/expired.
+export async function expireCheckoutSession(sessionId?: string | null) {
+  if (!sessionId) return false
+  try {
+    await stripe.checkout.sessions.expire(sessionId)
+    return true
+  } catch (error: unknown) {
+    const stripeError = error as { code?: string; message?: string, statusCode?: number }
+    // Already expired/completed sessions are fine to "expire"; anything else is
+    // logged and ignored — expiry must never block the cancellation itself.
+    if (stripeError.statusCode === 400 && /expired|complete/i.test(stripeError.message ?? '')) {
+      return true
+    }
+    console.warn(`Failed to expire checkout session ${sessionId}:`, stripeError.message)
+    return false
+  }
+}

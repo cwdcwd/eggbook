@@ -9,6 +9,7 @@ import { getOrCreateUser } from "@/lib/auth";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { CreateOrderSchema, OrderStatusParam } from "@/lib/schemas";
 import { rateLimit } from "@/lib/rate-limit";
+import { dollarsToCents } from "@/lib/payment-integrity";
 
 // Create a new order
 export async function POST(req: NextRequest) {
@@ -49,9 +50,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Calculate price and fee
+    // Calculate price and fee (server-derived; never accepted from the client)
     const totalPrice = listing.pricePerUnit * quantity;
-    
+
     // Get seller's current month volume for fee calculation
     const now = new Date();
     const volume = await db.sellerMonthlyVolume.findUnique({
@@ -66,6 +67,18 @@ export async function POST(req: NextRequest) {
 
     const { feePercent } = calculateFeeTier(volume?.totalSales || 0);
     const platformFee = calculatePlatformFee(totalPrice, feePercent);
+
+    // Order totals drive Stripe checkout amounts, so they must be exact whole
+    // cents; reject fractional-cent totals instead of charging a rounded sum.
+    try {
+      dollarsToCents(totalPrice);
+      dollarsToCents(platformFee);
+    } catch {
+      return NextResponse.json(
+        { error: "Order total must be a whole-cent amount" },
+        { status: 400 }
+      );
+    }
 
     // Create order and decrement stock in a transaction (with atomic check)
     const order = await db.$transaction(async (tx) => {

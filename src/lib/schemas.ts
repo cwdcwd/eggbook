@@ -174,6 +174,6 @@ export const AdminUserActionSchema = z.object({
 });
 
 export const AdminRefundSchema = z.object({
-  amount: z.number().positive().max(100000).optional(),
+  amount: z.number().positive().max(100000).refine((amount) => Number.isInteger(Math.round(amount * 100)), "Amount must be in whole cents").optional(),
   reason: z.string().max(500).optional(),
 });

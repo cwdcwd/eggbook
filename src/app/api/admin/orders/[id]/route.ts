@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { verifyAdmin } from "@/lib/auth";
 import { AdminOrderStatusSchema } from "@/lib/schemas";
 import { logOrderStatusChange } from "@/lib/order-audit";
+import { expireCheckoutSession } from "@/lib/stripe";
+import { nextAdminStatus, type AdminStatusRejectionCode } from "@/lib/payment-integrity";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -75,6 +77,19 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
+    const rejectionMessages: Record<AdminStatusRejectionCode, string> = {
+      terminal: "Order is in a terminal status and cannot be overridden",
+      "payment-transition-forbidden": "Paid orders cannot be cancelled — refund via the admin refund endpoint",
+    };
+
+    const rule = nextAdminStatus(order.status, status, Boolean(order.stripePaymentId));
+    if (!rule.allowed) {
+      return NextResponse.json(
+        { error: rejectionMessages[rule.code] },
+        { status: 409 }
+      );
+    }
+
     const updateData: Record<string, unknown> = { status };
 
     const reason = cancelReason || `Admin status override to ${status}`;
@@ -86,16 +101,31 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       updateData.completedAt = new Date();
     }
 
-    const updatedOrder = await db.$transaction(async (tx) => {
-      // Read current status inside transaction for accurate audit trail
-      const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
-      if (!current) {
-        return null;
+    const result = await db.$transaction(async (tx) => {
+      // Read current state inside transaction; the override decision is
+      // re-validated against it so a concurrent payment can't be overwritten.
+      const current = await tx.order.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, stripePaymentId: true },
+      });
+
+      const currentRule = nextAdminStatus(current.status, status, Boolean(current.stripePaymentId));
+      if (!currentRule.allowed) {
+        return { conflict: true as const };
       }
 
-      const updated = await tx.order.update({
-        where: { id },
+      // Compare-and-set: only applies if status is unchanged since the read.
+      const updatedRows = await tx.order.updateMany({
+        where: { id, status: current.status },
         data: updateData,
+      });
+
+      if (updatedRows.count === 0) {
+        return { conflict: true as const };
+      }
+
+      const updated = await tx.order.findUniqueOrThrow({
+        where: { id },
         include: {
           listing: true,
           buyer: true,
@@ -103,7 +133,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // Restore stock only when transitioning FROM a non-terminal/non-fulfilled status
+      // Restore stock only when transitioning FROM a non-fulfilled status
       const noRestoreStatuses = ["CANCELLED", "DECLINED", "COMPLETED"];
       if ((status === "CANCELLED" || status === "DECLINED") && order.listingId && !noRestoreStatuses.includes(current.status)) {
         await tx.eggListing.update({
@@ -122,14 +152,24 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         tx,
       });
 
-      return updated;
+      return { conflict: false as const, updated, checkoutSessionId: order.checkoutSessionId };
     });
 
-    if (!updatedOrder) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    if (result.conflict) {
+      return NextResponse.json(
+        { error: "Order was updated concurrently; please reload and retry" },
+        { status: 409 }
+      );
     }
 
-    return NextResponse.json(updatedOrder);
+    // Eligible cancellation: an open checkout session must no longer be payable.
+    if ((status === "CANCELLED" || status === "DECLINED") && result.checkoutSessionId) {
+      after(async () => {
+        await expireCheckoutSession(result.checkoutSessionId!);
+      });
+    }
+
+    return NextResponse.json(result.updated);
   } catch (error) {
     console.error("Error updating order:", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });

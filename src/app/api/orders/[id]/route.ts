@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { OrderStatus } from "@prisma/client";
 import { logOrderStatusChange } from "@/lib/order-audit";
 import { triggerOrderUpdate } from "@/lib/pusher";
 import { notifyUser } from "@/lib/beams-server";
+import { expireCheckoutSession } from "@/lib/stripe";
 import { OrderActionSchema } from "@/lib/schemas";
+import {
+  ORDER_TRANSITIONS,
+  isTransitionAllowed,
+  type OrderActionName,
+} from "@/lib/payment-integrity";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -105,32 +110,31 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const isBuyer = order.buyerId === user.id;
     const isSeller = user.sellerProfile?.id === order.sellerId;
 
-    // Define allowed transitions and who can make them
-    const transitions: Record<string, { fromStatus: OrderStatus[]; toStatus: OrderStatus; allowedBy: "buyer" | "seller" | "both" }> = {
-      confirm: { fromStatus: ["PENDING"], toStatus: "CONFIRMED", allowedBy: "seller" },
-      decline: { fromStatus: ["PENDING"], toStatus: "DECLINED", allowedBy: "seller" },
-      cancel: { fromStatus: ["PENDING", "CONFIRMED"], toStatus: "CANCELLED", allowedBy: "both" },
-      markPaid: { fromStatus: ["CONFIRMED"], toStatus: "PAID", allowedBy: "seller" }, // Manual payment (cash, Venmo, etc.)
-      complete: { fromStatus: ["PAID", "CONFIRMED"], toStatus: "COMPLETED", allowedBy: "seller" }, // Can complete directly from CONFIRMED if paid externally
-    };
-
-    const transition = transitions[action];
+    // Allowed transitions come from the shared integrity table; who may act is route policy.
+    const transition = ORDER_TRANSITIONS[action as OrderActionName];
     if (!transition) {
       return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
 
     // Check permission
+    const allowedBy: Record<OrderActionName, "buyer" | "seller" | "both"> = {
+      confirm: "seller",
+      decline: "seller",
+      cancel: "both",
+      markPaid: "seller",
+      complete: "seller",
+    };
     const canPerform =
-      (transition.allowedBy === "seller" && isSeller) ||
-      (transition.allowedBy === "buyer" && isBuyer) ||
-      (transition.allowedBy === "both" && (isBuyer || isSeller));
+      (allowedBy[action as OrderActionName] === "seller" && isSeller) ||
+      (allowedBy[action as OrderActionName] === "buyer" && isBuyer) ||
+      (allowedBy[action as OrderActionName] === "both" && (isBuyer || isSeller));
 
     if (!canPerform) {
       return NextResponse.json({ error: "Not authorized for this action" }, { status: 403 });
     }
 
-    // Check current status allows this transition
-    if (!transition.fromStatus.includes(order.status)) {
+    // Check current status allows this transition (fast-fail; re-checked in tx)
+    if (!isTransitionAllowed(action as OrderActionName, order.status)) {
       return NextResponse.json(
         { error: `Cannot ${action} order in ${order.status} status` },
         { status: 400 }
@@ -141,15 +145,22 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const actorType = isSeller ? "SELLER" : "BUYER";
 
     // Update order and log status change in transaction
-    const updatedOrder = await db.$transaction(async (tx) => {
-      // Re-read inside transaction to get current state (guards against concurrent webhook updates)
+    const result = await db.$transaction(async (tx) => {
+      // Re-read inside transaction; all decisions below use current state so a
+      // concurrent webhook payment update is honoured instead of overwritten.
       const current = await tx.order.findUniqueOrThrow({
         where: { id },
-        select: { paidAt: true, status: true },
+        select: { status: true, paidAt: true, checkoutSessionId: true },
       });
 
-      const updated = await tx.order.update({
-        where: { id },
+      if (!isTransitionAllowed(action as OrderActionName, current.status)) {
+        return { conflict: true as const };
+      }
+
+      // Compare-and-set: applies only if the status is unchanged since the read;
+      // a concurrent mutation makes this a no-op we surface as a conflict.
+      const updatedRows = await tx.order.updateMany({
+        where: { id, status: current.status },
         data: {
           status: transition.toStatus,
           ...(action === "cancel" && { cancelledAt: new Date(), cancelReason }),
@@ -157,6 +168,14 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
           ...(action === "markPaid" && { paidAt: new Date() }), // Manual payment
           ...(action === "complete" && { completedAt: new Date(), ...(!current.paidAt && { paidAt: new Date() }) }), // Set paidAt if completing directly
         },
+      });
+
+      if (updatedRows.count === 0) {
+        return { conflict: true as const };
+      }
+
+      const updated = await tx.order.findUniqueOrThrow({
+        where: { id },
         include: {
           listing: true,
           buyer: true,
@@ -164,7 +183,8 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // If declined or cancelled, restore stock
+      // If declined or cancelled, restore stock (inside the guarded branch,
+      // so it runs exactly once for the winning transition)
       if (["DECLINED", "CANCELLED"].includes(transition.toStatus)) {
         await tx.eggListing.update({
           where: { id: order.listingId },
@@ -192,8 +212,23 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         tx,
       });
 
-      return updated;
+      return { conflict: false as const, updated, checkoutSessionId: current.checkoutSessionId };
     });
+
+    if (result.conflict) {
+      return NextResponse.json(
+        { error: "Order was updated concurrently; please reload and retry" },
+        { status: 409 }
+      );
+    }
+    const updatedOrder = result.updated;
+
+    // Eligible cancellation: an open checkout session must no longer be payable.
+    if (["cancel", "decline"].includes(action) && result.checkoutSessionId) {
+      after(async () => {
+        await expireCheckoutSession(result.checkoutSessionId!);
+      });
+    }
 
     // Notify both buyer and seller about the status change
     const buyerUserId = updatedOrder.buyer.clerkId;
